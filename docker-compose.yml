@@ -1,0 +1,72 @@
+services:
+  postgres:
+    image: postgis/postgis:16-3.4
+    container_name: jobmap-postgres
+    environment:
+      POSTGRES_DB: jobmap
+      POSTGRES_USER: jobmap
+      POSTGRES_PASSWORD: jobmap_secret_123
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jobmap"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: jobmap-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ─── Scraper Worker (BullMQ + Playwright) ───────────
+  scraper-worker:
+    build:
+      context: ./scraper
+      dockerfile: Dockerfile
+    container_name: jobmap-scraper
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: jobmap
+      DB_USER: jobmap
+      DB_PASSWORD: jobmap_secret_123
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      SCRAPER_CONCURRENCY: 5
+      MAX_BROWSERS: 3
+      NODE_ENV: production
+      DIRECT_MODE: "false"
+      LOG_LEVEL: info
+    command: ["node", "src/worker.js"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - scraper-logs:/app/logs
+      - scraper-screenshots:/app/screenshots
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2.0'
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:
+  scraper-logs:
+  scraper-screenshots:
