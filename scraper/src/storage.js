@@ -20,7 +20,12 @@ function contentHash(title, companyId, sourceUrl) {
  * Returns { companyId, cityToOfficeId }
  */
 async function upsertCompany(companyData) {
-  const { offices, ...fields } = companyData;
+  const { offices, careerUrl, ...fields } = companyData;
+
+  // Map camelCase careerUrl → snake_case career_url for the database
+  if (careerUrl && !fields.career_url) {
+    fields.career_url = careerUrl;
+  }
 
   let company = await db('companies').where('slug', fields.slug).first();
   if (company) {
@@ -208,17 +213,25 @@ async function swapCompanyJobs(companyId) {
 
     let promoted = 0;
     if (stagingJobs.length > 0) {
-      // Batch insert in chunks of 50
+      // Deduplicate by content_hash (keep first occurrence)
+      const seen = new Set();
+      const uniqueJobs = stagingJobs.filter(job => {
+        if (seen.has(job.content_hash)) return false;
+        seen.add(job.content_hash);
+        return true;
+      });
+
+      // Batch insert in chunks of 50, ignore duplicates
       const chunkSize = 50;
-      for (let i = 0; i < stagingJobs.length; i += chunkSize) {
-        const chunk = stagingJobs.slice(i, i + chunkSize);
+      for (let i = 0; i < uniqueJobs.length; i += chunkSize) {
+        const chunk = uniqueJobs.slice(i, i + chunkSize);
         await trx('jobs').insert(chunk.map(job => ({
           ...job,
           created_at: new Date(),
           updated_at: new Date(),
-        })));
+        }))).onConflict('content_hash').ignore();
       }
-      promoted = stagingJobs.length;
+      promoted = uniqueJobs.length;
     }
 
     // Step 3: Clear staging

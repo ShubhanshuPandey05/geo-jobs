@@ -1,22 +1,43 @@
-import { useEffect, useRef, useCallback, useState } from 'react';
+import { useEffect, useRef, useCallback, useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { CITIES } from '../utils/constants';
 import { fetchMapMarkers } from '../services/api';
 
-// ─── Leaflet imports (MVP — free, no token required) ────────────────────────
+// ─── Leaflet imports ─────────────────────────────────────────────────────────
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import './map.css';
 
-// ─── COMMENTED-OUT MAPBOX IMPORTS ────────────────────────────────────────────
-// import mapboxgl from 'mapbox-gl';
-// mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || 'pk.eyJ1IjoibWFwYm94IiwiYSI6ImNpejY4NXVycTA2emYycXBndHRqcmZ3N3gifQ.rJcFIG214AriISLbB6B5aw';
-// ─────────────────────────────────────────────────────────────────────────────
-
-export default function MapView({ selectedCity, onCompanySelect, selectedCompany, onMapLoad }) {
+export default function MapView({ selectedCity, onCompanySelect, selectedCompany, onMapLoad, userLocation, theme }) {
   const mapContainer = useRef(null);
   const map = useRef(null);
   const markersRef = useRef([]);
+  const userMarkerRef = useRef(null);
+  const tileLayerRef = useRef(null);
+  const tempMarkerRef = useRef(null);
+  const tempMarkerTimeoutRef = useRef(null);
   const [mapReady, setMapReady] = useState(false);
+
+  const getTileLayerConfig = useCallback((mode) => {
+    const attribution =
+      '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/">CARTO</a>';
+
+    if (mode === 'light') {
+      return {
+        url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+        attribution,
+        subdomains: 'abcd',
+        maxZoom: 19,
+      };
+    }
+
+    return {
+      url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+      attribution,
+      subdomains: 'abcd',
+      maxZoom: 19,
+    };
+  }, []);
 
   const city = CITIES[selectedCity] || CITIES.Bangalore;
 
@@ -27,6 +48,27 @@ export default function MapView({ selectedCity, onCompanySelect, selectedCompany
     enabled: mapReady,
   });
 
+  const visibleMarkers = useMemo(() => {
+    if (!markerData?.data) return [];
+
+    return markerData.data.filter((company) => {
+      const jobCount = Number(company.job_count || 0);
+      return jobCount > 0 && company.latitude && company.longitude;
+    });
+  }, [markerData]);
+
+  const clearTempMarker = useCallback(() => {
+    if (tempMarkerTimeoutRef.current) {
+      clearTimeout(tempMarkerTimeoutRef.current);
+      tempMarkerTimeoutRef.current = null;
+    }
+
+    if (tempMarkerRef.current) {
+      tempMarkerRef.current.remove();
+      tempMarkerRef.current = null;
+    }
+  }, []);
+
   // ─── Initialize Leaflet map ──────────────────────────────────────────────
   useEffect(() => {
     if (map.current) return;
@@ -34,18 +76,18 @@ export default function MapView({ selectedCity, onCompanySelect, selectedCompany
     map.current = L.map(mapContainer.current, {
       center: [city.lat, city.lng],
       zoom: city.zoom,
-      zoomControl: false, // we'll add it manually in a better position
+      zoomControl: false,
     });
 
-    // OpenStreetMap dark-themed tiles (CartoDB Dark Matter — free, no key)
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-      attribution:
-        '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/">CARTO</a>',
-      subdomains: 'abcd',
-      maxZoom: 19,
+    const tileConfig = getTileLayerConfig(theme);
+
+    tileLayerRef.current = L.tileLayer(tileConfig.url, {
+      attribution: tileConfig.attribution,
+      subdomains: tileConfig.subdomains,
+      maxZoom: tileConfig.maxZoom,
     }).addTo(map.current);
 
-    // Zoom control bottom-right (mirroring Mapbox layout)
+    // Zoom control bottom-right
     L.control.zoom({ position: 'bottomright' }).addTo(map.current);
 
     setMapReady(true);
@@ -57,6 +99,23 @@ export default function MapView({ selectedCity, onCompanySelect, selectedCompany
     };
   }, []);
 
+  useEffect(() => {
+    if (!map.current) return;
+
+    const tileConfig = getTileLayerConfig(theme);
+
+    if (tileLayerRef.current && tileLayerRef.current._url === tileConfig.url) {
+      return;
+    }
+
+    tileLayerRef.current?.remove();
+    tileLayerRef.current = L.tileLayer(tileConfig.url, {
+      attribution: tileConfig.attribution,
+      subdomains: tileConfig.subdomains,
+      maxZoom: tileConfig.maxZoom,
+    }).addTo(map.current);
+  }, [theme, getTileLayerConfig]);
+
   // ─── Fly to city when changed ────────────────────────────────────────────
   useEffect(() => {
     if (!map.current) return;
@@ -64,16 +123,76 @@ export default function MapView({ selectedCity, onCompanySelect, selectedCompany
     map.current.flyTo([target.lat, target.lng], target.zoom, { duration: 1.5 });
   }, [selectedCity]);
 
-  // ─── Render markers ──────────────────────────────────────────────────────
+  // ─── User location marker (RED PIN) ─────────────────────────────────────
   useEffect(() => {
-    if (!map.current || !markerData?.data) return;
+    if (!map.current) return;
+
+    // Remove old marker
+    if (userMarkerRef.current) {
+      userMarkerRef.current.remove();
+      userMarkerRef.current = null;
+    }
+
+    if (!userLocation) return;
+
+    const userIcon = L.divIcon({
+      className: '',
+      html: `
+        <div class="user-location-marker" title="${userLocation.label || 'My Location'}">
+          <div class="user-location-pulse"></div>
+        </div>
+      `,
+      iconSize: [20, 20],
+      iconAnchor: [10, 10],
+      popupAnchor: [0, -16],
+    });
+
+    const popup = L.popup({
+      maxWidth: 220,
+      closeButton: true,
+      className: 'leaflet-dark-popup',
+    }).setContent(`
+      <div style="padding: 14px; font-family: var(--font-sans, Inter, system-ui, -apple-system, sans-serif); text-align: center;">
+        <div style="display:flex;align-items:center;justify-content:center;gap:6px;margin-bottom:6px;">
+          <div style="width:10px;height:10px;border-radius:50%;background:#ef4444;border:2px solid white;box-shadow:0 0 8px rgba(239,68,68,0.5);"></div>
+          <span style="font-weight:700;font-size:13px;color:var(--color-text-primary);">You are here</span>
+        </div>
+        <div style="font-size:11px;color:var(--color-text-secondary);margin-bottom:4px;">
+          ${userLocation.label || 'My Location'}
+        </div>
+        <div style="font-size:10px;color:var(--color-text-muted);">
+          ${userLocation.lat.toFixed(4)}°N, ${userLocation.lng.toFixed(4)}°E
+        </div>
+      </div>
+    `);
+
+    userMarkerRef.current = L.marker(
+      [userLocation.lat, userLocation.lng],
+      { icon: userIcon, zIndexOffset: 1000 }
+    )
+      .bindPopup(popup)
+      .addTo(map.current);
+
+    // Fly to user location with some zoom
+    map.current.flyTo([userLocation.lat, userLocation.lng], 13, { duration: 1.5 });
+
+    // Open the popup after fly animation
+    setTimeout(() => {
+      userMarkerRef.current?.openPopup();
+    }, 1600);
+  }, [userLocation]);
+
+  // ─── Render company markers ──────────────────────────────────────────────
+  useEffect(() => {
+    if (!map.current) return;
 
     // Clear existing markers
     markersRef.current.forEach((m) => m.remove());
     markersRef.current = [];
 
-    markerData.data.forEach((company) => {
-      if (!company.latitude || !company.longitude) return;
+    if (!visibleMarkers.length) return;
+
+    visibleMarkers.forEach((company) => {
 
       // Color by industry
       const colors = {
@@ -86,34 +205,34 @@ export default function MapView({ selectedCity, onCompanySelect, selectedCompany
       };
       const [c1, c2] = colors[company.industry] || colors.default;
 
-      // Create a custom DivIcon (same look as the Mapbox marker)
+      // Custom DivIcon
       const icon = L.divIcon({
-        className: '', // reset default leaflet styles
-        html: `<div class="company-marker" style="background:linear-gradient(135deg,${c1},${c2})" title="${company.name}">${company.job_count || ''}</div>`,
-        iconSize: [36, 36],
-        iconAnchor: [18, 18],
-        popupAnchor: [0, -22],
+        className: '',
+        html: `<div class="company-marker" style="background:linear-gradient(135deg,${c1},${c2});box-shadow:0 4px 16px ${c1}50,0 0 0 3px ${c1}10" title="${company.name}">${company.job_count || ''}</div>`,
+        iconSize: [38, 38],
+        iconAnchor: [19, 19],
+        popupAnchor: [0, -24],
       });
 
-      // Popup content (identical to Mapbox version)
+      // Enhanced popup content
       const popupContent = `
-        <div style="padding: 16px; font-family: Inter, sans-serif;">
-          <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+        <div style="padding: 18px; font-family: var(--font-sans, Inter, system-ui, -apple-system, sans-serif); min-width: 200px;">
+          <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
             ${company.logo_url
-              ? `<img src="${company.logo_url}" alt="" style="width:32px;height:32px;border-radius:8px;" />`
-              : `<div style="width:32px;height:32px;border-radius:8px;background:linear-gradient(135deg,${c1},${c2});display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:14px;">${company.name[0]}</div>`
+              ? `<img src="${company.logo_url}" alt="" style="width:36px;height:36px;border-radius:10px;object-fit:cover;" />`
+              : `<div style="width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,${c1},${c2});display:flex;align-items:center;justify-content:center;color:white;font-weight:800;font-size:13px;box-shadow:0 4px 12px ${c1}30;">${company.name[0]}</div>`
             }
             <div>
-              <div style="font-weight:600;font-size:14px;color:#f1f5f9;">${company.name}</div>
-              <div style="font-size:11px;color:#94a3b8;">${company.industry || ''} · ${company.city || ''}</div>
+              <div style="font-weight:700;font-size:14px;color:var(--color-text-primary);line-height:1.2;">${company.name}</div>
+              <div style="font-size:11px;color:var(--color-text-secondary);margin-top:2px;">${company.industry || ''} · ${company.city || ''}</div>
             </div>
           </div>
-          <div style="display:flex;align-items:center;gap:6px;padding:8px 12px;background:rgba(99,102,241,0.1);border-radius:8px;margin-top:8px;">
-            <span style="font-size:20px;font-weight:700;color:#818cf8;">${company.job_count || 0}</span>
-            <span style="font-size:12px;color:#94a3b8;">active jobs</span>
+          <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:linear-gradient(135deg,${c1}10,${c2}10);border-radius:10px;border:1px solid ${c1}15;">
+            <span style="font-size:22px;font-weight:800;background:linear-gradient(135deg,${c1},${c2});-webkit-background-clip:text;-webkit-text-fill-color:transparent;">${company.job_count || 0}</span>
+            <span style="font-size:11px;color:var(--color-text-secondary);font-weight:500;">active jobs</span>
           </div>
           <button onclick="window.__selectCompany__('${company.slug}','${company.name}','${company.industry}','${company.city}')"
-            style="width:100%;margin-top:10px;padding:8px;background:linear-gradient(135deg,#6366f1,#4f46e5);color:white;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;">
+            style="width:100%;margin-top:12px;padding:10px;background:linear-gradient(135deg,${c1},${c2});color:white;border:none;border-radius:10px;font-size:12px;font-weight:700;cursor:pointer;transition:all 0.2s;box-shadow:0 4px 12px ${c1}30;letter-spacing:0.3px;">
             View Jobs →
           </button>
         </div>
@@ -124,7 +243,7 @@ export default function MapView({ selectedCity, onCompanySelect, selectedCompany
         { icon }
       )
         .bindPopup(popupContent, {
-          maxWidth: 280,
+          maxWidth: 300,
           closeButton: true,
           className: 'leaflet-dark-popup',
         })
@@ -141,7 +260,7 @@ export default function MapView({ selectedCity, onCompanySelect, selectedCompany
       markersRef.current.push(marker);
     });
 
-    // Global handler for popup button clicks (same as Mapbox version)
+    // Global handler for popup button clicks
     window.__selectCompany__ = (slug, name, industry, cityName) => {
       onCompanySelect({ slug, name, industry, city: cityName });
     };
@@ -149,182 +268,79 @@ export default function MapView({ selectedCity, onCompanySelect, selectedCompany
     return () => {
       delete window.__selectCompany__;
     };
-  }, [markerData, onCompanySelect]);
+  }, [visibleMarkers, onCompanySelect]);
 
   // ─── Highlight selected company ──────────────────────────────────────────
   useEffect(() => {
-    if (!selectedCompany || !map.current || !markerData?.data) return;
-    const comp = markerData.data.find((c) => c.slug === selectedCompany.slug);
-    if (comp?.latitude && comp?.longitude) {
-      map.current.flyTo(
-        [parseFloat(comp.latitude), parseFloat(comp.longitude)],
-        15,
-        { duration: 1 }
-      );
+    if (!selectedCompany || !map.current) return;
+
+    clearTempMarker();
+
+    const hasJobCount = selectedCompany.job_count !== undefined && selectedCompany.job_count !== null;
+    const jobCount = Number(selectedCompany.job_count);
+    const isZeroJobs = hasJobCount && Number.isFinite(jobCount) && jobCount <= 0;
+
+    let targetLat = Number(selectedCompany.latitude ?? selectedCompany.lat);
+    let targetLng = Number(selectedCompany.longitude ?? selectedCompany.lng);
+
+    if (!Number.isFinite(targetLat) || !Number.isFinite(targetLng)) {
+      const comp = markerData?.data?.find((c) => c.slug === selectedCompany.slug);
+      if (comp?.latitude && comp?.longitude) {
+        targetLat = Number(comp.latitude);
+        targetLng = Number(comp.longitude);
+      }
     }
-  }, [selectedCompany, markerData]);
+
+    if (!Number.isFinite(targetLat) || !Number.isFinite(targetLng)) return;
+
+    map.current.flyTo(
+      [targetLat, targetLng],
+      isZeroJobs ? 14 : 15,
+      { duration: 1 }
+    );
+
+    if (!isZeroJobs) return;
+
+    const tempIcon = L.divIcon({
+      className: '',
+      html: '<div class="temp-company-marker"><div class="temp-company-pulse"></div></div>',
+      iconSize: [22, 22],
+      iconAnchor: [11, 11],
+      popupAnchor: [0, -16],
+    });
+
+    tempMarkerRef.current = L.marker([targetLat, targetLng], {
+      icon: tempIcon,
+      zIndexOffset: 900,
+    }).addTo(map.current);
+
+    tempMarkerTimeoutRef.current = setTimeout(() => {
+      clearTempMarker();
+    }, 3500);
+  }, [selectedCompany, markerData, clearTempMarker]);
 
   return (
-    <div ref={mapContainer} className="w-full h-full" />
+    <div className="relative w-full h-full">
+      <div ref={mapContainer} className="w-full h-full" />
+      {/* Left edge fade */}
+      <div className="map-overlay-left" />
+
+      {/* Floating stats on map */}
+      {markerData?.data && (
+        <div className="map-stats-float">
+          <div className="map-stat-chip">
+            <div className="w-2 h-2 rounded-full bg-primary-light" />
+            <span className="font-semibold text-text-primary">{visibleMarkers.length}</span>
+            <span>companies on map</span>
+          </div>
+          {userLocation && (
+            <div className="map-stat-chip">
+              <div className="w-2 h-2 rounded-full bg-danger animate-pulse" />
+              <span className="font-medium text-danger">{userLocation.label}</span>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// COMMENTED-OUT MAPBOX IMPLEMENTATION (kept for future use)
-// ═══════════════════════════════════════════════════════════════════════════════
-//
-// import mapboxgl from 'mapbox-gl';
-//
-// mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || 'pk.eyJ1IjoibWFwYm94IiwiYSI6ImNpejY4NXVycTA2emYycXBndHRqcmZ3N3gifQ.rJcFIG214AriISLbB6B5aw';
-//
-// export default function MapView({ selectedCity, onCompanySelect, selectedCompany, onMapLoad }) {
-//   const mapContainer = useRef(null);
-//   const map = useRef(null);
-//   const markersRef = useRef([]);
-//   const [mapReady, setMapReady] = useState(false);
-//
-//   const city = CITIES[selectedCity] || CITIES.Bangalore;
-//
-//   // Fetch markers
-//   const { data: markerData } = useQuery({
-//     queryKey: ['mapMarkers'],
-//     queryFn: () => fetchMapMarkers(),
-//     enabled: mapReady,
-//   });
-//
-//   // Initialize map
-//   useEffect(() => {
-//     if (map.current) return;
-//
-//     map.current = new mapboxgl.Map({
-//       container: mapContainer.current,
-//       style: 'mapbox://styles/mapbox/dark-v11',
-//       center: [city.lng, city.lat],
-//       zoom: city.zoom,
-//       pitch: 0,
-//       bearing: 0,
-//       antialias: true,
-//     });
-//
-//     map.current.addControl(new mapboxgl.NavigationControl(), 'bottom-right');
-//
-//     map.current.on('load', () => {
-//       setMapReady(true);
-//       if (onMapLoad) onMapLoad(map.current);
-//     });
-//
-//     return () => {
-//       map.current?.remove();
-//       map.current = null;
-//     };
-//   }, []);
-//
-//   // Fly to city when changed
-//   useEffect(() => {
-//     if (!map.current) return;
-//     const target = CITIES[selectedCity] || CITIES.Bangalore;
-//     map.current.flyTo({
-//       center: [target.lng, target.lat],
-//       zoom: target.zoom,
-//       duration: 2000,
-//       essential: true,
-//     });
-//   }, [selectedCity]);
-//
-//   // Render markers
-//   useEffect(() => {
-//     if (!map.current || !markerData?.data) return;
-//
-//     // Clear existing markers
-//     markersRef.current.forEach((m) => m.remove());
-//     markersRef.current = [];
-//
-//     markerData.data.forEach((company) => {
-//       if (!company.latitude || !company.longitude) return;
-//
-//       // Create marker element
-//       const el = document.createElement('div');
-//       el.className = 'company-marker';
-//       el.textContent = company.job_count || '';
-//       el.title = company.name;
-//
-//       // Color by industry
-//       const colors = {
-//         Fintech: ['#6366f1', '#8b5cf6'],
-//         'E-commerce': ['#ec4899', '#f43f5e'],
-//         'Food Tech': ['#f59e0b', '#ef4444'],
-//         SaaS: ['#06b6d4', '#3b82f6'],
-//         'Developer Tools': ['#10b981', '#06b6d4'],
-//         default: ['#6366f1', '#06b6d4'],
-//       };
-//       const [c1, c2] = colors[company.industry] || colors.default;
-//       el.style.background = `linear-gradient(135deg, ${c1}, ${c2})`;
-//
-//       // Popup content
-//       const popup = new mapboxgl.Popup({ offset: 25, closeButton: true, maxWidth: '280px' })
-//         .setHTML(`
-//           <div style="padding: 16px; font-family: Inter, sans-serif;">
-//             <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
-//               ${company.logo_url
-//                 ? `<img src="${company.logo_url}" alt="" style="width:32px;height:32px;border-radius:8px;" />`
-//                 : `<div style="width:32px;height:32px;border-radius:8px;background:linear-gradient(135deg,${c1},${c2});display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:14px;">${company.name[0]}</div>`
-//               }
-//               <div>
-//                 <div style="font-weight:600;font-size:14px;color:#f1f5f9;">${company.name}</div>
-//                 <div style="font-size:11px;color:#94a3b8;">${company.industry || ''} · ${company.city || ''}</div>
-//               </div>
-//             </div>
-//             <div style="display:flex;align-items:center;gap:6px;padding:8px 12px;background:rgba(99,102,241,0.1);border-radius:8px;margin-top:8px;">
-//               <span style="font-size:20px;font-weight:700;color:#818cf8;">${company.job_count || 0}</span>
-//               <span style="font-size:12px;color:#94a3b8;">active jobs</span>
-//             </div>
-//             <button onclick="window.__selectCompany__('${company.slug}','${company.name}','${company.industry}','${company.city}')"
-//               style="width:100%;margin-top:10px;padding:8px;background:linear-gradient(135deg,#6366f1,#4f46e5);color:white;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;">
-//               View Jobs →
-//             </button>
-//           </div>
-//         `);
-//
-//       const marker = new mapboxgl.Marker(el)
-//         .setLngLat([parseFloat(company.longitude), parseFloat(company.latitude)])
-//         .setPopup(popup)
-//         .addTo(map.current);
-//
-//       el.addEventListener('click', () => {
-//         map.current.flyTo({
-//           center: [parseFloat(company.longitude), parseFloat(company.latitude)],
-//           zoom: 14,
-//           duration: 1000,
-//         });
-//       });
-//
-//       markersRef.current.push(marker);
-//     });
-//
-//     // Global handler for popup button clicks
-//     window.__selectCompany__ = (slug, name, industry, city) => {
-//       onCompanySelect({ slug, name, industry, city });
-//     };
-//
-//     return () => {
-//       delete window.__selectCompany__;
-//     };
-//   }, [markerData, onCompanySelect]);
-//
-//   // Highlight selected company
-//   useEffect(() => {
-//     if (!selectedCompany || !map.current || !markerData?.data) return;
-//     const comp = markerData.data.find((c) => c.slug === selectedCompany.slug);
-//     if (comp?.latitude && comp?.longitude) {
-//       map.current.flyTo({
-//         center: [parseFloat(comp.longitude), parseFloat(comp.latitude)],
-//         zoom: 15,
-//         duration: 1200,
-//       });
-//     }
-//   }, [selectedCompany, markerData]);
-//
-//   return (
-//     <div ref={mapContainer} className="w-full h-full" />
-//   );
-// }

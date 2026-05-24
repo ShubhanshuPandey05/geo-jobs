@@ -219,7 +219,7 @@ async function scrapeAllSources(company) {
   }
 
   // Try career page / generic scraping
-  const careerUrl = company.career_url;
+  const careerUrl = company.careerUrl;
   if (careerUrl) {
     try {
       const jobs = await genericScraper.scrape(careerUrl, { forceDynamic: false });
