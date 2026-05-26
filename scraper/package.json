@@ -6,7 +6,7 @@
   "scripts": {
     "scrape": "node src/index.js",
     "worker": "node src/worker.js",
-    "orchestrate": "node src/orchestrator.js",
+    "orchestrate": "node --max-old-space-size=8192 src/orchestrator.js",
     "discover": "node src/discover.js",
     "discover:careers": "node src/scrapers/companiesScraper.js",
     "seed": "node src/seed-companies.js",

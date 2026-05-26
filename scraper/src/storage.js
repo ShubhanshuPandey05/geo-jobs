@@ -20,11 +20,11 @@ function contentHash(title, companyId, sourceUrl) {
  * Returns { companyId, cityToOfficeId }
  */
 async function upsertCompany(companyData) {
-  const { offices, careerUrl, ...fields } = companyData;
+  const { offices, career_url, ...fields } = companyData;
 
-  // Map camelCase careerUrl → snake_case career_url for the database
-  if (careerUrl && !fields.career_url) {
-    fields.career_url = careerUrl;
+  // Map camelCase career_url → snake_case career_url for the database
+  if (career_url && !fields.career_url) {
+    fields.career_url = career_url;
   }
 
   let company = await db('companies').where('slug', fields.slug).first();
@@ -229,7 +229,7 @@ async function swapCompanyJobs(companyId) {
           ...job,
           created_at: new Date(),
           updated_at: new Date(),
-        }))).onConflict('content_hash').ignore();
+        }))).onConflict(db.raw('(content_hash) WHERE content_hash IS NOT NULL')).ignore();
       }
       promoted = uniqueJobs.length;
     }

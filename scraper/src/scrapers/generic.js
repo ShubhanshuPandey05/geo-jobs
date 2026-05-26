@@ -1,286 +1,395 @@
 /**
- * Generic Career Page Scraper
- * Heuristic-based job extraction from custom career pages
- * Supports: React, Next.js, Vue, Webflow, Notion, static HTML
+ * Generic Career Page Scraper — LLM-Powered
+ *
+ * Pipeline:
+ * 1. Render the career page DOM via Playwright (browser-pool)
+ * 2. Strip noise: script, style, svg, footer, header, nav, cookie banners, tracking elements
+ * 3. Convert the cleaned DOM into compact Markdown
+ * 4. Send the Markdown to Ollama (Qwen 7B) for structured job extraction
+ * 5. Normalize and return the extracted jobs
  */
+const axios = require('axios');
 const cheerio = require('cheerio');
+const fs = require('fs');
+const path = require('path');
+const browserPool = require('../utils/browser-pool');
 const logger = require('../utils/logger');
-const { hybridFetch } = require('../utils/http-client');
 const { normalizeJob, classifyDepartment, detectWorkType, matchCity } = require('../utils/normalizer');
 
-// ─── Selectors for common career page patterns ───────
-const JOB_LIST_SELECTORS = [
-  // Common career page patterns
-  '[class*="job-list"] a', '[class*="jobList"] a', '[class*="job_list"] a',
-  '[class*="career"] a[href*="job"]', '[class*="career"] a[href*="position"]',
-  '[class*="opening"] a', '[class*="position"] a',
-  '[class*="vacancy"] a', '[class*="posting"] a',
-  // Data attributes
-  '[data-job]', '[data-position]', '[data-posting]',
-  // Notion career pages
-  '.notion-collection-item a',
-  // Lever embeds
-  '.lever-job-posting a',
-  // Common list patterns
-  '.jobs-list a', '.job-listings a', '.career-listing a',
-  '#careers a[href*="/job"]', '#jobs a',
-  // Table-based job listings
-  'table tr a[href*="job"]', 'table tr a[href*="career"]',
-  // Webflow
-  '.w-dyn-item a',
-  // Generic link patterns that look like job postings
-  'a[href*="/careers/"][href*="/"]',
-  'a[href*="/jobs/"][href*="/"]',
-  'a[href*="/positions/"]',
-];
+const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'qwen2.5:7b-instruct';
+const OLLAMA_TIMEOUT = parseInt(process.env.OLLAMA_TIMEOUT) || 180000; // 3 minutes
 
-const JOB_CARD_SELECTORS = [
-  '[class*="job-card"]', '[class*="jobCard"]', '[class*="job_card"]',
-  '[class*="job-item"]', '[class*="jobItem"]', '[class*="job_item"]',
-  '[class*="posting-card"]', '[class*="position-card"]',
-  '[class*="career-item"]', '[class*="opening-item"]',
-  '.job', '.position', '.opening', '.posting',
-  'li[class*="job"]', 'li[class*="position"]',
-  'article[class*="job"]', 'article[class*="career"]',
-  'div[class*="job"]', 'div[class*="position"]',
-];
-
-const TITLE_SELECTORS = [
-  'h2', 'h3', 'h4',
-  '[class*="title"]', '[class*="name"]',
-  '[class*="heading"]', '[class*="position"]',
-  'a', 'strong',
-];
-
-const LOCATION_SELECTORS = [
-  '[class*="location"]', '[class*="city"]', '[class*="place"]',
-  '[class*="geo"]', '[class*="region"]', '[class*="office"]',
-  'span:has(> svg)', // Icon + text pattern
-];
-
-const DEPARTMENT_SELECTORS = [
-  '[class*="department"]', '[class*="team"]', '[class*="category"]',
-  '[class*="function"]', '[class*="group"]',
+// ─── Noise selectors to strip from the DOM ────────────
+const NOISE_SELECTORS = [
+  // Scripts & styles
+  'script', 'style', 'noscript',
+  // SVG & canvas
+  'svg', 'canvas',
+  // Structural chrome
+  'footer', 'header', 'nav',
+  // Cookie banners & consent managers
+  '[class*="cookie"]', '[class*="consent"]', '[class*="gdpr"]',
+  '[id*="cookie"]', '[id*="consent"]', '[id*="gdpr"]',
+  '[class*="CookieBanner"]', '[class*="cookie-banner"]',
+  '[class*="cookie-notice"]', '[class*="cookie-popup"]',
+  // Tracking & analytics
+  '[class*="tracking"]', '[class*="analytics"]',
+  '[class*="gtm-"]', '[class*="ga-"]',
+  'iframe[src*="google"]', 'iframe[src*="facebook"]',
+  'iframe[src*="doubleclick"]', 'iframe[src*="analytics"]',
+  // Chat widgets & popups
+  '[class*="chat-widget"]', '[class*="chatbot"]',
+  '[class*="intercom"]', '[class*="crisp"]', '[class*="zendesk"]',
+  '[class*="drift"]', '[class*="hubspot"]',
+  '[id*="intercom"]', '[id*="crisp"]',
+  // Social sharing & newsletter
+  '[class*="social-share"]', '[class*="newsletter"]',
+  '[class*="subscribe"]',
+  // Ads
+  '[class*="advertisement"]', '[class*="ad-banner"]',
+  '[class*="ad-slot"]', 'ins.adsbygoogle',
+  // Hidden & decorative
+  '[aria-hidden="true"]', '[style*="display:none"]', '[style*="display: none"]',
+  // Images & media (we only care about text)
+  'img', 'video', 'audio', 'picture', 'source',
+  // Forms that aren't relevant
+  'form:not([class*="search"])',
 ];
 
 /**
- * Scrape a generic career page
+ * Scrape a generic career page using LLM extraction
  */
 async function scrape(url, options = {}) {
   logger.info(`[Generic] Scraping career page: ${url}`);
 
   try {
-    const result = await hybridFetch(url, {
-      forceDynamic: options.forceDynamic || false,
-      scrollToBottom: true,
-      timeout: 30000,
-    });
-
-    if (!result || !result.html) {
-      logger.warn(`[Generic] Failed to fetch ${url}`);
+    // Step 1: Render the page with Playwright
+    const html = await renderPage(url, options);
+    if (!html) {
+      logger.warn(`[Generic] Failed to render ${url}`);
       return [];
     }
 
-    logger.info(`[Generic] Fetched via ${result.method}: ${url}`);
-    const $ = cheerio.load(result.html);
-    let jobs = [];
-
-    // Strategy 1: Try structured job cards
-    jobs = extractFromJobCards($, url);
-    if (jobs.length > 0) {
-      logger.info(`[Generic] Found ${jobs.length} jobs via card extraction`);
-      return jobs;
+    // Step 2: Strip noise and convert to Markdown
+    const markdown = htmlToCleanMarkdown(html, url);
+    if (!markdown || markdown.trim().length < 50) {
+      logger.warn(`[Generic] Page content too short after cleaning: ${url}`);
+      return [];
     }
 
-    // Strategy 2: Try job links/list items
-    jobs = extractFromJobLinks($, url);
-    if (jobs.length > 0) {
-      logger.info(`[Generic] Found ${jobs.length} jobs via link extraction`);
-      return jobs;
+    logger.info(`[Generic] Cleaned markdown: ${markdown.length} chars from ${url}`);
+
+    // Save markdown to temp-markdown folder
+    // try {
+    //   const tempDir = path.resolve(__dirname, '../../temp-markdown');
+    //   if (!fs.existsSync(tempDir)) {
+    //     fs.mkdirSync(tempDir, { recursive: true });
+    //   }
+    //   let fileName = options.companyName ? options.companyName.replace(/[^a-z0-9]/gi, '_').toLowerCase() : new URL(url).hostname.replace(/[^a-z0-9]/gi, '_');
+    //   const filePath = path.join(tempDir, `${fileName}.md`);
+    //   fs.writeFileSync(filePath, markdown);
+    //   logger.info(`[Generic] Saved markdown to ${filePath}`);
+    // } catch (fsErr) {
+    //   logger.warn(`[Generic] Failed to save markdown file: ${fsErr.message}`);
+    // }
+
+    // Step 3: Send to Ollama for job extraction
+    const rawJobs = await extractJobsWithLLM(markdown, url);
+    if (!rawJobs || rawJobs.length === 0) {
+      logger.warn(`[Generic] LLM found no jobs on ${url}`);
+      return [];
     }
 
-    // Strategy 3: Try heuristic text pattern extraction
-    jobs = extractFromTextPatterns($, url);
-    if (jobs.length > 0) {
-      logger.info(`[Generic] Found ${jobs.length} jobs via text pattern extraction`);
-      return jobs;
-    }
+    // Step 4: Normalize the extracted jobs
+    const jobs = rawJobs.map(job => normalizeJob({
+      title: job.title || '',
+      source_url: resolveUrl(job.url, url) || url,
+      location_raw: job.location || '',
+      matched_city: matchCity(job.location || ''),
+      department: job.department || classifyDepartment(job.title || ''),
+      work_type: job.work_type || detectWorkType(job.location || '', job.title || ''),
+      ats_platform: 'career_page',
+    }));
 
-    logger.warn(`[Generic] No jobs found on ${url}`);
-    return [];
+    logger.info(`[Generic] Extracted ${jobs.length} jobs via LLM from ${url}`);
+    return jobs;
   } catch (err) {
     logger.error(`[Generic] Error scraping ${url}: ${err.message}`);
     return [];
   }
 }
 
-/**
- * Strategy 1: Extract from structured job cards
- */
-function extractFromJobCards($, baseUrl) {
-  const jobs = [];
+// ─── Step 1: Render the page with Playwright ──────────
 
-  for (const selector of JOB_CARD_SELECTORS) {
-    const cards = $(selector);
-    if (cards.length < 2) continue; // Need at least 2 to confirm it's a list
+async function renderPage(url, options = {}) {
+  try {
+    return await browserPool.withPage(async (page) => {
+      // Random human-like delay
+      await new Promise(r => setTimeout(r, 300 + Math.random() * 700));
 
-    cards.each((_, card) => {
-      const $card = $(card);
-      const job = extractJobFromElement($, $card, baseUrl);
-      if (job && job.title && job.title.length > 3) {
-        jobs.push(normalizeJob({
-          ...job,
-          ats_platform: 'career_page',
-        }));
-      }
-    });
+      await page.goto(url, {
+        waitUntil: 'networkidle',
+        timeout: options.timeout || 30000,
+      });
 
-    if (jobs.length > 0) break;
+      // Wait for job-related content to appear
+      await page.waitForSelector(
+        '[class*="job"], [class*="position"], [class*="opening"], [class*="career"], [class*="listing"], main, article, [role="main"]',
+        { timeout: 10000 }
+      ).catch(() => { });
+
+      // Scroll to load lazy content
+      await autoScroll(page);
+
+      return await page.content();
+    }, { timeout: options.timeout || 30000 });
+  } catch (err) {
+    logger.error(`[Generic] Playwright render failed for ${url}: ${err.message}`);
+    return null;
   }
-
-  return jobs;
 }
 
-/**
- * Strategy 2: Extract from job links
- */
-function extractFromJobLinks($, baseUrl) {
-  const jobs = [];
-  const seen = new Set();
-
-  for (const selector of JOB_LIST_SELECTORS) {
-    const links = $(selector);
-    if (links.length < 2) continue;
-
-    links.each((_, el) => {
-      const $el = $(el);
-      const href = resolveUrl($el.attr('href'), baseUrl);
-      if (!href || seen.has(href)) return;
-      seen.add(href);
-
-      const title = $el.text().trim();
-      if (!title || title.length < 3 || title.length > 200) return;
-
-      // Filter out navigation links
-      if (isNavigationLink(title)) return;
-
-      // Try to find location near the link
-      const parent = $el.parent();
-      const locationEl = parent.find(LOCATION_SELECTORS.join(', ')).first();
-      const location = locationEl.text().trim() || '';
-
-      const deptEl = parent.find(DEPARTMENT_SELECTORS.join(', ')).first();
-      const department = deptEl.text().trim() || '';
-
-      const city = matchCity(location) || matchCity(title);
-
-      jobs.push(normalizeJob({
-        title: cleanTitle(title),
-        source_url: href,
-        location_raw: location,
-        matched_city: city,
-        department: department || classifyDepartment(title),
-        work_type: detectWorkType(location, title),
-        ats_platform: 'career_page',
-      }));
-    });
-
-    if (jobs.length > 0) break;
+async function autoScroll(page, maxScrolls = 5) {
+  let previousHeight = 0;
+  let scrollCount = 0;
+  while (scrollCount < maxScrolls) {
+    const currentHeight = await page.evaluate(() => document.body.scrollHeight);
+    if (currentHeight === previousHeight) break;
+    previousHeight = currentHeight;
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    await new Promise(r => setTimeout(r, 800 + Math.random() * 600));
+    scrollCount++;
   }
-
-  return jobs;
 }
 
-/**
- * Strategy 3: Text pattern extraction
- * Looks for repeating patterns that look like job listings
- */
-function extractFromTextPatterns($, baseUrl) {
-  const jobs = [];
-  const body = $('main, [role="main"], .content, #content, body');
+// ─── Step 2: Strip noise & convert to Markdown ───────
 
-  // Find all links with job-like titles
-  body.find('a').each((_, el) => {
+function htmlToCleanMarkdown(html, baseUrl) {
+  const $ = cheerio.load(html);
+
+  // Remove all noise elements
+  for (const selector of NOISE_SELECTORS) {
+    try {
+      $(selector).remove();
+    } catch {
+      // Some selectors might fail on malformed HTML, skip
+    }
+  }
+
+  // Remove empty elements
+  $('*').each((_, el) => {
     const $el = $(el);
-    const text = $el.text().trim();
-    const href = $el.attr('href');
-
-    if (!text || !href || text.length < 5 || text.length > 200) return;
-    if (isNavigationLink(text)) return;
-
-    // Check if the link text looks like a job title
-    if (looksLikeJobTitle(text)) {
-      const resolvedUrl = resolveUrl(href, baseUrl);
-      if (!resolvedUrl) return;
-
-      // Find surrounding text for location/department
-      const container = $el.closest('li, tr, div, article').first();
-      const containerText = container.text();
-      const city = matchCity(containerText);
-
-      jobs.push(normalizeJob({
-        title: cleanTitle(text),
-        source_url: resolvedUrl,
-        location_raw: '',
-        matched_city: city,
-        department: classifyDepartment(text),
-        work_type: detectWorkType(containerText, text),
-        ats_platform: 'career_page',
-      }));
+    if (!$el.text().trim() && !$el.find('a').length) {
+      $el.remove();
     }
   });
 
-  return jobs;
+  // Target the main content area
+  const mainContent = $('main, [role="main"], #content, .content, [class*="career"], [class*="job"], [class*="opening"], [class*="position"]').first();
+  const root = mainContent.length ? mainContent : $('body');
+
+  // Convert to markdown
+  const lines = [];
+  convertNodeToMarkdown(root, lines, $, baseUrl);
+
+  // Deduplicate and clean the lines
+  let markdown = lines
+    .map(l => l.trim())
+    .filter(l => l.length > 0)
+    .join('\n');
+
+  // Collapse multiple blank lines
+  markdown = markdown.replace(/\n{3,}/g, '\n\n');
+
+  // Truncate to avoid overwhelming the LLM (keep first ~8000 chars)
+  const MAX_CHARS = 8000;
+  if (markdown.length > MAX_CHARS) {
+    markdown = markdown.substring(0, MAX_CHARS) + '\n\n[... content truncated ...]';
+  }
+
+  return markdown;
 }
 
 /**
- * Extract job info from a card element
+ * Recursively convert DOM nodes to Markdown text
  */
-function extractJobFromElement($, $card, baseUrl) {
-  // Find title
-  let title = '';
-  for (const sel of TITLE_SELECTORS) {
-    const el = $card.find(sel).first();
-    if (el.length && el.text().trim().length > 3) {
-      title = el.text().trim();
-      break;
+function convertNodeToMarkdown(node, lines, $, baseUrl) {
+  if (!node || !node.length) return;
+
+  node.contents().each((_, child) => {
+    if (child.type === 'text') {
+      const text = $(child).text().trim();
+      if (text) {
+        lines.push(text);
+      }
+      return;
     }
+
+    if (child.type !== 'tag') return;
+
+    const $child = $(child);
+    const tag = child.tagName?.toLowerCase();
+
+    switch (tag) {
+      case 'h1':
+        lines.push(`\n# ${$child.text().trim()}`);
+        break;
+      case 'h2':
+        lines.push(`\n## ${$child.text().trim()}`);
+        break;
+      case 'h3':
+        lines.push(`\n### ${$child.text().trim()}`);
+        break;
+      case 'h4':
+      case 'h5':
+      case 'h6':
+        lines.push(`\n#### ${$child.text().trim()}`);
+        break;
+      case 'a': {
+        const href = $child.attr('href');
+        const text = $child.text().trim();
+        if (text && href) {
+          const resolved = resolveUrl(href, baseUrl);
+          lines.push(`[${text}](${resolved || href})`);
+        } else if (text) {
+          lines.push(text);
+        }
+        break;
+      }
+      case 'li':
+        lines.push(`- ${$child.text().trim()}`);
+        break;
+      case 'br':
+        lines.push('');
+        break;
+      case 'p':
+      case 'div':
+      case 'section':
+      case 'article':
+      case 'span':
+      case 'td':
+      case 'th':
+      case 'tr':
+      case 'ul':
+      case 'ol':
+      case 'dl':
+      case 'dt':
+      case 'dd':
+      case 'main':
+      case 'aside':
+      case 'table':
+      case 'tbody':
+      case 'thead':
+        convertNodeToMarkdown($child, lines, $, baseUrl);
+        break;
+      default:
+        // For unknown tags, just recurse
+        convertNodeToMarkdown($child, lines, $, baseUrl);
+        break;
+    }
+  });
+}
+
+// ─── Step 3: LLM-based job extraction ─────────────────
+
+async function extractJobsWithLLM(markdown, pageUrl) {
+  const prompt = buildExtractionPrompt(markdown, pageUrl);
+
+  try {
+    const response = await axios.post(
+      `${OLLAMA_URL}/api/generate`,
+      {
+        model: OLLAMA_MODEL,
+        prompt,
+        stream: false,
+        options: {
+          temperature: 0.1,
+          num_predict: 8192,
+        },
+      },
+      {
+        timeout: OLLAMA_TIMEOUT,
+        headers: { 'Content-Type': 'application/json' },
+      }
+    );
+
+    const raw = response.data.response || '';
+    return parseExtractionResponse(raw);
+  } catch (err) {
+    logger.error(`[Generic] Ollama extraction failed: ${err.message}`);
+    return [];
+  }
+}
+
+function buildExtractionPrompt(markdown, pageUrl) {
+  return `/no_think
+You are a job listing extractor. Below is the cleaned text content of a company career page.
+
+Your task: Extract ALL individual job postings from this content.
+
+For each job, extract:
+- "title": The exact job title (e.g. "Senior Software Engineer", "Product Manager")
+- "url": The direct link/URL to the job posting if visible, otherwise empty string ""
+- "location": The job location if mentioned (e.g. "Bangalore", "Remote", "Mumbai, India")
+- "department": The department or team if mentioned (e.g. "Engineering", "Marketing")
+- "work_type": One of "remote", "hybrid", "onsite", or "" if unclear
+
+RULES:
+1. Only extract ACTUAL job postings with specific role titles
+2. DO NOT extract: page titles, navigation items, section headers, company descriptions, or generic text
+3. DO NOT extract entries like "View All Jobs", "Apply Now", "About Us", "Our Culture", etc.
+4. If a department header groups multiple jobs, assign that department to each job under it
+5. If no jobs are found, return an empty array []
+
+PAGE URL: ${pageUrl}
+
+CAREER PAGE CONTENT:
+${markdown}
+
+Respond with ONLY a JSON array. No explanation, no markdown code blocks.
+Example: [{"title":"Software Engineer","url":"https://example.com/jobs/123","department":"Engineering","work_type":"remote","experience_min":"2","experience_max":"4","salary_min":"1000000","salary_max":"1500000"}]
+
+JSON:`;
+}
+
+function parseExtractionResponse(responseText) {
+  let cleaned = responseText.trim();
+
+  // Strip markdown code blocks
+  cleaned = cleaned.replace(/^```json\s*/i, '').replace(/^```\s*/i, '');
+  cleaned = cleaned.replace(/\s*```$/i, '');
+  cleaned = cleaned.trim();
+
+  // Try to find JSON array in the response
+  const arrayMatch = cleaned.match(/\[[\s\S]*\]/);
+  if (!arrayMatch) {
+    logger.warn('[Generic] No JSON array found in LLM response');
+    logger.debug(`[Generic] Raw LLM response: ${cleaned.substring(0, 500)}`);
+    return [];
   }
 
-  // Find link
-  let link = $card.find('a').first().attr('href') || '';
-  link = resolveUrl(link, baseUrl);
+  try {
+    const parsed = JSON.parse(arrayMatch[0]);
+    if (!Array.isArray(parsed)) return [];
 
-  // Find location
-  let location = '';
-  for (const sel of LOCATION_SELECTORS) {
-    const el = $card.find(sel).first();
-    if (el.length) {
-      location = el.text().trim();
-      break;
-    }
+    // Validate and filter each job entry
+    return parsed.filter(job => {
+      if (!job || typeof job !== 'object') return false;
+      if (!job.title || typeof job.title !== 'string') return false;
+
+      const title = job.title.trim();
+      // Filter obvious non-jobs
+      if (title.length < 3 || title.length > 200) return false;
+      if (/^(apply|view|see|learn|read|click|submit|sign|log)/i.test(title)) return false;
+
+      return true;
+    });
+  } catch (err) {
+    logger.warn(`[Generic] Failed to parse LLM extraction response: ${err.message}`);
+    logger.debug(`[Generic] Attempted to parse: ${arrayMatch[0].substring(0, 500)}`);
+    return [];
   }
-
-  // Find department
-  let department = '';
-  for (const sel of DEPARTMENT_SELECTORS) {
-    const el = $card.find(sel).first();
-    if (el.length) {
-      department = el.text().trim();
-      break;
-    }
-  }
-
-  if (!title) return null;
-
-  return {
-    title: cleanTitle(title),
-    source_url: link || baseUrl,
-    location_raw: location,
-    matched_city: matchCity(location) || matchCity($card.text()),
-    department: department || classifyDepartment(title),
-    work_type: detectWorkType(location, title, $card.text()),
-  };
 }
 
 // ─── Utilities ────────────────────────────────────────
@@ -292,41 +401,6 @@ function resolveUrl(href, baseUrl) {
   } catch {
     return null;
   }
-}
-
-function cleanTitle(title) {
-  return title
-    .replace(/\s+/g, ' ')
-    .replace(/[\n\r\t]/g, ' ')
-    .replace(/^(apply|view|see|open)\s+(for\s+)?/i, '')
-    .trim();
-}
-
-function isNavigationLink(text) {
-  const navWords = [
-    'home', 'about', 'contact', 'login', 'sign up', 'register',
-    'blog', 'news', 'press', 'privacy', 'terms', 'cookie',
-    'facebook', 'twitter', 'linkedin', 'instagram', 'youtube',
-    'back to', 'view all', 'see all', 'show more', 'load more',
-    'menu', 'close', 'search', 'filter',
-  ];
-  const t = text.toLowerCase().trim();
-  return t.length < 3 || navWords.some(w => t === w || t.startsWith(w + ' '));
-}
-
-function looksLikeJobTitle(text) {
-  const jobKeywords = [
-    'engineer', 'developer', 'designer', 'manager', 'analyst',
-    'architect', 'lead', 'director', 'specialist', 'coordinator',
-    'consultant', 'associate', 'executive', 'officer', 'scientist',
-    'researcher', 'strategist', 'planner', 'writer', 'editor',
-    'intern', 'trainee', 'head of', 'vp of', 'chief',
-    'frontend', 'backend', 'fullstack', 'devops', 'sre',
-    'product', 'marketing', 'sales', 'support', 'success',
-    'qa', 'testing', 'security', 'data', 'ml', 'ai',
-  ];
-  const t = text.toLowerCase();
-  return jobKeywords.some(k => t.includes(k));
 }
 
 module.exports = { scrape, platform: 'career_page' };

@@ -14,7 +14,7 @@ const axios = require('axios');
 const logger = require('../utils/logger');
 
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'qwen:7b';
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'qwen2.5:7b-instruct';
 const CONFIDENCE_THRESHOLD = parseFloat(process.env.AI_CONFIDENCE_THRESHOLD) || 0.6;
 const OLLAMA_TIMEOUT = parseInt(process.env.OLLAMA_TIMEOUT) || 120000; // 2 minutes
 
@@ -100,9 +100,6 @@ For each entry, respond with:
 IMPORTANT RULES:
 1. A real job posting has a specific role title (e.g. "Senior Software Engineer", "Product Manager")
 2. Generic text like "Join Our Team", "About Us", "Contact", "View All Jobs" are NOT job postings
-3. Department/category headers like "Engineering", "Marketing" are NOT job postings  
-4. If a title contains action words like "Apply Now", "Learn More" without a role — it's NOT a job
-5. Duplicate or near-duplicate entries should have lower confidence for the duplicates
 
 INPUT (JSON array):
 ${JSON.stringify(jobSummaries, null, 2)}

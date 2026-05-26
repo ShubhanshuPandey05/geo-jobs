@@ -11,6 +11,7 @@
  * Usage: node src/orchestrator.js
  */
 require('dotenv').config({ path: require('path').resolve(__dirname, '../../.env') });
+const readline = require('readline');
 const logger = require('./utils/logger');
 const companies = require('./companies');
 const storage = require('./storage');
@@ -29,7 +30,7 @@ const TRUSTED_ATS_PLATFORMS = new Set(['greenhouse', 'lever', 'ashby']);
 
 async function orchestrate() {
   logger.info('═'.repeat(60));
-  logger.info('JobMap Orchestrator v3.0 — Sequential Pipeline');
+  logger.info('JobMap Orchestrator v3.0 — Parallel Pipeline');
   logger.info(`Time: ${new Date().toISOString()}`);
   logger.info(`Companies: ${companies.length}`);
   logger.info('═'.repeat(60));
@@ -54,45 +55,65 @@ async function orchestrate() {
     errors: [],
   };
 
-  for (let i = 0; i < companies.length; i++) {
-    const company = companies[i];
-    const progress = `[${i + 1}/${companies.length}]`;
+  const concurrency = await new Promise(resolve => {
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout
+    });
+    rl.question('Enter number of concurrent processes (default 1): ', answer => {
+      rl.close();
+      resolve(parseInt(answer) || 1);
+    });
+  });
 
-    logger.info('');
-    logger.info('─'.repeat(60));
-    logger.info(`${progress} Processing: ${company.name}`);
-    logger.info('─'.repeat(60));
+  logger.info(`Starting with concurrency: ${concurrency}`);
 
-    const startTime = Date.now();
+  let currentIndex = 0;
 
-    try {
-      await processCompany(company, aiAvailable, summary);
-      summary.processed++;
-    } catch (err) {
-      summary.failed++;
-      summary.errors.push({ company: company.name, error: err.message });
-      logger.error(`${progress} ❌ FAILED: ${company.name} — ${err.message}`);
+  const workers = Array(concurrency).fill().map(async (_, workerId) => {
+    while (true) {
+      const i = currentIndex++;
+      if (i >= companies.length) break;
 
-      // Clean up staging on error
+      const company = companies[i];
+      const progress = `[${i + 1}/${companies.length}]`;
+
+      logger.info('');
+      logger.info('─'.repeat(60));
+      logger.info(`${progress} Worker ${workerId + 1} Processing: ${company.name}`);
+      logger.info('─'.repeat(60));
+
+      const startTime = Date.now();
+
       try {
-        const existing = await db('companies').where('slug', company.slug).first();
-        if (existing) {
-          await storage.clearCompanyStaging(existing.id);
+        await processCompany(company, aiAvailable, summary);
+        summary.processed++;
+      } catch (err) {
+        summary.failed++;
+        summary.errors.push({ company: company.name, error: err.message });
+        logger.error(`${progress} ❌ Worker ${workerId + 1} FAILED: ${company.name} — ${err.message}`);
+
+        // Clean up staging on error
+        try {
+          const existing = await db('companies').where('slug', company.slug).first();
+          if (existing) {
+            await storage.clearCompanyStaging(existing.id);
+          }
+        } catch (cleanupErr) {
+          logger.error(`  Staging cleanup failed: ${cleanupErr.message}`);
         }
-      } catch (cleanupErr) {
-        logger.error(`  Staging cleanup failed: ${cleanupErr.message}`);
       }
-    }
 
-    const durationMs = Date.now() - startTime;
-    logger.info(`  ⏱️  ${company.name} completed in ${durationMs}ms`);
+      const durationMs = Date.now() - startTime;
+      logger.info(`  ⏱️  Worker ${workerId + 1}: ${company.name} completed in ${durationMs}ms`);
 
-    // Rate limiting between companies
-    if (i < companies.length - 1) {
+      // Rate limiting between companies
       const delay = 1500 + Math.random() * 1000;
       await new Promise(r => setTimeout(r, delay));
     }
-  }
+  });
+
+  await Promise.all(workers);
 
   // Print summary
   printSummary(summary);
@@ -128,17 +149,21 @@ async function processCompany(company, aiAvailable, summary) {
   // Step 4: AI validate generic/career page jobs
   let validatedGenericJobs = [];
   if (genericJobs.length > 0) {
-    if (aiAvailable) {
-      validatedGenericJobs = await validateJobs(genericJobs, company.name);
-      const filtered = genericJobs.length - validatedGenericJobs.length;
-      summary.totalAiValidated += validatedGenericJobs.length;
-      summary.totalAiFiltered += filtered;
-      logger.info(`  🤖 AI validated: ${validatedGenericJobs.length} passed, ${filtered} filtered out`);
-    } else {
-      // No AI — pass everything through with null confidence
-      validatedGenericJobs = genericJobs.map(j => ({ ...j, ai_confidence: null, ai_is_active: true }));
-      logger.info(`  ⚠️  No AI — all ${genericJobs.length} generic jobs passed through unvalidated`);
-    }
+    // if (aiAvailable) {
+    //   validatedGenericJobs = await validateJobs(genericJobs, company.name);
+    //   const filtered = genericJobs.length - validatedGenericJobs.length;
+    //   summary.totalAiValidated += validatedGenericJobs.length;
+    //   summary.totalAiFiltered += filtered;
+    //   logger.info(`  🤖 AI validated: ${validatedGenericJobs.length} passed, ${filtered} filtered out`);
+    // } else {
+
+
+    // No AI Needed — pass everything through with confidence cause this is extracted by Ai model only
+    validatedGenericJobs = genericJobs.map(j => ({ ...j, ai_confidence: 90, ai_is_active: true }));
+    logger.info(`  ⚠️  No AI Needed — all ${genericJobs.length} generic jobs passed through`);
+
+
+    // }
 
     if (validatedGenericJobs.length > 0) {
       await storage.insertToStaging(
@@ -219,24 +244,25 @@ async function scrapeAllSources(company) {
   }
 
   // Try career page / generic scraping
-  const careerUrl = company.careerUrl;
-  if (careerUrl) {
+  const career_url = company.career_url;
+  if (career_url) {
     try {
-      const jobs = await genericScraper.scrape(careerUrl, { forceDynamic: false });
+      const jobs = await genericScraper.scrape(career_url, { forceDynamic: false, companyName: company.name });
       genericJobs.push(...jobs);
       method = method === 'api' ? 'hybrid' : 'career_page';
-      logger.info(`  [Career] ${careerUrl}: ${jobs.length} jobs`);
+      logger.info(`  [Career] ${career_url}: ${jobs.length} jobs`);
     } catch (err) {
       logger.error(`  [Career] Scrape failed: ${err.message}`);
     }
-  } else if (!company.ats_platform && company.website) {
+  }
+  else if (!company.ats_platform && company.website) {
     // Attempt career page discovery
     try {
       logger.info(`  [Discovery] Searching for career page on ${company.website}...`);
       const discoveredUrl = await discoverCareerPage(company.website);
       if (discoveredUrl) {
         logger.info(`  [Discovery] Found: ${discoveredUrl}`);
-        const jobs = await genericScraper.scrape(discoveredUrl, { forceDynamic: false });
+        const jobs = await genericScraper.scrape(discoveredUrl, { forceDynamic: false, companyName: company.name });
         genericJobs.push(...jobs);
         method = 'discovery';
       } else {

@@ -297,7 +297,7 @@ def main():
             result = {
                 "name": name,
                 **{k: v for k, v in company.items() if k != "name"},
-                "careerUrl": career_url,
+                "career_url": career_url,
             }
             results.append(result)
             print(f"   ✅ {career_url}")
