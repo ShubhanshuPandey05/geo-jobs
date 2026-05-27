@@ -38,8 +38,45 @@ export const fetchJobById = async (id) => {
   return data;
 };
 
+/**
+ * Full search — returns both jobs and companies with highlighting
+ */
+export const searchAll = async (q, params = {}) => {
+  const { data } = await api.get('/search', { params: { q, type: 'all', ...params } });
+  return data;
+};
+
+/**
+ * Search only jobs
+ */
 export const searchJobs = async (q, params = {}) => {
-  const { data } = await api.get('/search', { params: { q, ...params } });
+  const { data } = await api.get('/search', { params: { q, type: 'jobs', ...params } });
+  return data;
+};
+
+/**
+ * Search only companies
+ */
+export const searchCompanies = async (q, params = {}) => {
+  const { data } = await api.get('/search', { params: { q, type: 'companies', ...params } });
+  return data;
+};
+
+/**
+ * Lightweight autocomplete suggestions — for instant search dropdown
+ */
+export const fetchSuggestions = async (q, city) => {
+  const params = { q };
+  if (city) params.city = city;
+  const { data } = await api.get('/search/suggest', { params });
+  return data;
+};
+
+/**
+ * Trigger manual Meilisearch re-sync
+ */
+export const triggerSearchSync = async () => {
+  const { data } = await api.post('/search/sync');
   return data;
 };
 

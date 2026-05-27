@@ -30,6 +30,25 @@ services:
       timeout: 5s
       retries: 5
 
+  # ─── Meilisearch (fast fuzzy search engine) ───────────
+  meilisearch:
+    image: getmeili/meilisearch:v1.12
+    container_name: jobmap-meilisearch
+    environment:
+      MEILI_MASTER_KEY: jobmap_meili_master_key_123
+      MEILI_ENV: development
+      MEILI_LOG_LEVEL: INFO
+    ports:
+      - "7700:7700"
+    volumes:
+      - meilidata:/meili_data
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--spider", "http://localhost:7700/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
   # ─── Scraper Worker (BullMQ + Playwright) ───────────
   scraper-worker:
     build:
@@ -68,5 +87,6 @@ services:
 volumes:
   pgdata:
   redisdata:
+  meilidata:
   scraper-logs:
   scraper-screenshots:

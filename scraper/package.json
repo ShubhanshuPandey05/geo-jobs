@@ -9,8 +9,10 @@
     "orchestrate": "node --max-old-space-size=8192 src/orchestrator.js",
     "discover": "node src/discover.js",
     "discover:careers": "node src/scrapers/companiesScraper.js",
-    "seed": "node src/seed-companies.js",
-    "findlocations": "node src/scrapers/companyLocationsScrapper.js"
+    "consolidate": "node src/consolidate-companies.js",
+    "seed:api": "node src/seed-companies-api.js",
+    "findlocations": "node src/scrapers/findLocations.js",
+    "findlocations:legacy": "node src/scrapers/companyLocationsScrapper.js"
   },
   "dependencies": {
     "@google/genai": "^2.6.0",

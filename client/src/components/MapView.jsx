@@ -219,9 +219,9 @@ export default function MapView({ selectedCity, onCompanySelect, selectedCompany
         <div style="padding: 18px; font-family: var(--font-sans, Inter, system-ui, -apple-system, sans-serif); min-width: 200px;">
           <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
             ${company.logo_url
-              ? `<img src="${company.logo_url}" alt="" style="width:36px;height:36px;border-radius:10px;object-fit:cover;" />`
-              : `<div style="width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,${c1},${c2});display:flex;align-items:center;justify-content:center;color:white;font-weight:800;font-size:13px;box-shadow:0 4px 12px ${c1}30;">${company.name[0]}</div>`
-            }
+          ? `<img src="${company.logo_url}" alt="" style="width:36px;height:36px;border-radius:10px;object-fit:cover;" />`
+          : `<div style="width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,${c1},${c2});display:flex;align-items:center;justify-content:center;color:white;font-weight:800;font-size:13px;box-shadow:0 4px 12px ${c1}30;">${company.name[0]}</div>`
+        }
             <div>
               <div style="font-weight:700;font-size:14px;color:var(--color-text-primary);line-height:1.2;">${company.name}</div>
               <div style="font-size:11px;color:var(--color-text-secondary);margin-top:2px;">${company.industry || ''} · ${company.city || ''}</div>

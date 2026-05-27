@@ -1,11 +1,13 @@
 import { useState } from 'react';
-import { Search, MapPin, Menu, X, Navigation, ChevronDown, Sun, Moon } from 'lucide-react';
+import { MapPin, Menu, X, Navigation, ChevronDown, Sun, Moon } from 'lucide-react';
 import { CITIES } from '../utils/constants';
+import SearchBar from './SearchBar';
 
 export default function Header({
   selectedCity,
   onCityChange,
   onSearch,
+  onCompanySelect,
   sidebarOpen,
   onToggleSidebar,
   onRequestLocation,
@@ -13,13 +15,7 @@ export default function Header({
   theme,
   onToggleTheme,
 }) {
-  const [searchValue, setSearchValue] = useState('');
   const [showAllCities, setShowAllCities] = useState(false);
-
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    onSearch(searchValue);
-  };
 
   const cityKeys = Object.keys(CITIES);
   const topCities = cityKeys.slice(0, 4);
@@ -50,23 +46,12 @@ export default function Header({
         </div>
       </div>
 
-      {/* Search Bar */}
-      <form onSubmit={handleSubmit} className="flex-1 max-w-lg">
-        <div className="relative group">
-          <Search
-            size={15}
-            className="absolute left-3.5 top-1/2 -translate-y-1/2 text-text-muted group-focus-within:text-primary-light transition-colors"
-          />
-          <input
-            type="text"
-            id="search-input"
-            value={searchValue}
-            onChange={(e) => setSearchValue(e.target.value)}
-            placeholder="Search jobs, companies, roles..."
-            className="w-full pl-10 pr-4 py-2 bg-surface-light/60 border border-border rounded-xl text-sm text-text-primary placeholder:text-text-muted/70 focus:outline-none focus:border-primary/50 focus:bg-surface-light focus:shadow-lg focus:shadow-primary/5 transition-all duration-300"
-          />
-        </div>
-      </form>
+      {/* Search Bar — now powered by Meilisearch */}
+      <SearchBar
+        selectedCity={selectedCity}
+        onSearch={onSearch}
+        onCompanySelect={onCompanySelect}
+      />
 
       {/* City Selector */}
       <div className="flex items-center gap-1 relative">

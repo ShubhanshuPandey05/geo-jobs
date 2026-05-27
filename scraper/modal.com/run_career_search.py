@@ -1,9 +1,12 @@
 """
-Client script — calls the deployed Qwen3 Agent on Modal to research
-company career pages and writes results back to companiesCareerUrl.js
+Career URL Search — API-Driven
+
+Fetches companies without career URLs from the admin API,
+uses the deployed Qwen3 Agent on Modal to research career pages,
+and updates each company's career_url via the API as it finds them.
 
 Usage:
-    python run_career_search.py              # Research all from companies.js
+    python run_career_search.py              # Research all without career URLs
     python run_career_search.py "Stripe"     # Research specific companies
     python run_career_search.py --dry-run    # Preview without calling API
 """
@@ -11,117 +14,56 @@ Usage:
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 from pathlib import Path
 
 import httpx
 
-# ─── Paths ────────────────────────────────────────────────────────────────
+# ─── Config ───────────────────────────────────────────────────────────────────
 SCRIPT_DIR = Path(__file__).parent
-COMPANIES_JS = SCRIPT_DIR / ".." / "src" / "scrapers" / "companies.js"
-OUTPUT_JS = SCRIPT_DIR / ".." / "src" / "scrapers" / "companiesCareerUrl.js"
 
-# ─── Deployed Modal endpoint URL ─────────────────────────────────────────
-API_URL = "https://webdevshubhanshu--qwen3-agent-api-chat.modal.run"
+# Load .env from project root
+ENV_PATH = SCRIPT_DIR / ".." / ".." / ".env"
+if ENV_PATH.exists():
+    for line in ENV_PATH.read_text().splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            key, _, value = line.partition("=")
+            os.environ.setdefault(key.strip(), value.strip())
+
+API_BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:3001")
+ADMIN_TOKEN = os.environ.get("ADMIN_API_TOKEN", "")
+MODAL_API_URL = "https://webdevshubhanshu--qwen3-agent-api-chat.modal.run"
 
 
-def parse_companies_js(filepath: Path) -> list[dict]:
-    """Parse companies.js and extract company objects."""
-    text = filepath.read_text(encoding="utf-8")
-
-    match = re.search(r"const\s+companies\s*=\s*\[(.+)\];", text, re.DOTALL)
-    if not match:
-        print("❌ Could not parse companies.js")
-        return []
-
-    array_body = match.group(1)
-
-    # Remove JS comments (block comments first, then line comments outside strings)
-    array_body = re.sub(r"/\*.*?\*/", "", array_body, flags=re.DOTALL)
-    array_body = re.sub(r"(?<![\"':])//.*?$", "", array_body, flags=re.MULTILINE)
-
-    # Convert JS → JSON
-    array_body = re.sub(r"'", '"', array_body)
-    # Convert JS `undefined` to JSON `null`
-    array_body = re.sub(r'\bundefined\b', 'null', array_body)
-    # Quote unquoted JS object keys (only after { , or newline to avoid breaking URLs)
-    array_body = re.sub(
-        r'(?<=[\{\,\n])\s*(\w+)\s*:',
-        lambda m: f' "{m.group(1)}":',
-        array_body,
+def get_companies_without_career_url() -> list[dict]:
+    """Fetch companies without career URLs from the admin API."""
+    resp = httpx.get(
+        f"{API_BASE_URL}/api/admin/companies/without-career-url",
+        headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
+        timeout=30.0,
     )
-    array_body = re.sub(r",\s*([}\]])", r"\1", array_body)
+    resp.raise_for_status()
+    data = resp.json()
+    return data.get("companies", [])
 
+
+def update_career_url(company_id: int, slug: str, career_url: str) -> bool:
+    """Update a single company's career_url via the admin API."""
     try:
-        return json.loads(f"[{array_body}]")
-    except json.JSONDecodeError as e:
-        print(f"⚠️  JSON parse fallback (regex mode): {e}")
-        names = re.findall(r"name:\s*['\"](.+?)['\"]", text)
-        websites = re.findall(r"website:\s*['\"](.+?)['\"]", text)
-        return [{"name": n, "website": w} for n, w in zip(names, websites)]
-
-
-def format_js_value(value, indent: int = 4) -> str:
-    """Convert a Python value to its JavaScript representation."""
-    prefix = " " * indent
-    if value is None:
-        return "undefined"
-    elif isinstance(value, bool):
-        return "true" if value else "false"
-    elif isinstance(value, (int, float)):
-        return str(value)
-    elif isinstance(value, str):
-        escaped = value.replace("'", "\\'")
-        return f"'{escaped}'"
-    elif isinstance(value, dict):
-        inner = ", ".join(
-            f"{k}: {format_js_value(v, indent)}" for k, v in value.items()
+        resp = httpx.patch(
+            f"{API_BASE_URL}/api/admin/companies/{slug}/career-url",
+            json={"career_url": career_url},
+            headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
+            timeout=15.0,
         )
-        return "{ " + inner + " }"
-    elif isinstance(value, list):
-        if not value:
-            return "[]"
-        # Check if list contains objects (dicts)
-        if any(isinstance(item, dict) for item in value):
-            items = []
-            for item in value:
-                items.append(f"{prefix}  {format_js_value(item, indent + 2)}")
-            return "[\n" + ",\n".join(items) + f",\n{prefix}]"
-        else:
-            items = [format_js_value(item, indent) for item in value]
-            return "[" + ", ".join(items) + "]"
-    else:
-        return f"'{value}'"
-
-
-def write_results_js(results: list[dict], output_path: Path):
-    """Write results as a JS module file."""
-    from datetime import datetime, timezone
-
-    lines = [
-        "/**",
-        " * Companies with discovered career page URLs",
-        f" * Auto-generated by run_career_search.py on {datetime.now(timezone.utc).isoformat()}",
-        f" * Total: {len(results)} companies",
-        " */",
-        "const companiesWithCareerUrls = [",
-    ]
-
-    for company in results:
-        lines.append("  {")
-        for key, value in company.items():
-            formatted = format_js_value(value, indent=4)
-            lines.append(f"    {key}: {formatted},")
-        lines.append("  },")
-
-    lines.append("];")
-    lines.append("")
-    lines.append("module.exports = companiesWithCareerUrls;")
-    lines.append("")
-
-    output_path.write_text("\n".join(lines), encoding="utf-8")
-    print(f"✅ Wrote {len(results)} companies to {output_path}")
+        resp.raise_for_status()
+        return True
+    except Exception as e:
+        print(f"   ⚠️  API update failed: {e}")
+        return False
 
 
 def extract_career_url(response_text: str, company_website: str = "") -> str | None:
@@ -176,7 +118,7 @@ def call_agent(query: str, system_prompt: str, timeout: float = 180.0) -> dict |
     """Call the deployed Modal agent via HTTP POST."""
     try:
         resp = httpx.post(
-            API_URL,
+            MODAL_API_URL,
             json={"query": query, "system_prompt": system_prompt},
             timeout=timeout,
         )
@@ -198,28 +140,39 @@ def main():
     dry_run = "--dry-run" in args
     args = [a for a in args if a != "--dry-run"]
 
-    # ── Load companies ──
-    if args:
-        companies = [{"name": name} for name in args]
-    else:
-        if not COMPANIES_JS.exists():
-            print(f"❌ {COMPANIES_JS} not found")
-            sys.exit(1)
-        companies = parse_companies_js(COMPANIES_JS)
-
-    if not companies:
-        print("❌ No companies found to research")
+    if not ADMIN_TOKEN:
+        print("❌ ADMIN_API_TOKEN not set in .env")
         sys.exit(1)
 
+    # ── Load companies ──
+    if args:
+        # Specific companies by name — still fetch from API for IDs
+        all_companies = get_companies_without_career_url()
+        target_names = {n.lower() for n in args}
+        companies = [c for c in all_companies if c["name"].lower() in target_names]
+        if not companies:
+            print(f"❌ None of {args} found in companies without career URLs")
+            sys.exit(1)
+    else:
+        print(f"📡 Fetching companies without career URLs from API...")
+        companies = get_companies_without_career_url()
+
+    if not companies:
+        print("✅ All companies already have career URLs!")
+        return
+
     print(f"🏢 Found {len(companies)} companies to research")
-    for c in companies:
+    for c in companies[:10]:
         print(f"   • {c['name']}")
+    if len(companies) > 10:
+        print(f"   ... and {len(companies) - 10} more")
 
     if dry_run:
         print("\n🔍 Dry run — no API calls made")
         return
 
-    print(f"\n🔗 Endpoint: {API_URL}")
+    print(f"\n🔗 Modal Endpoint: {MODAL_API_URL}")
+    print(f"🔗 Admin API: {API_BASE_URL}")
     print("   (First request may take ~2 min while GPU starts)\n")
 
     json_example = '{"career_url": "<url or null>", "source": "<where you found it>", "confidence": "high/low/none"}'
@@ -233,13 +186,15 @@ def main():
         "Respond with JSON only."
     )
 
-    results = []
+    found = 0
     skipped = []
     total = len(companies)
 
     for i, company in enumerate(companies, 1):
         name = company["name"]
         website = company.get("website", "")
+        slug = company.get("slug", "")
+        company_id = company.get("id")
 
         print(f"[{i}/{total}] 🔍 Researching: {name}")
 
@@ -294,32 +249,29 @@ def main():
         career_url = extract_career_url(response, website)
 
         if career_url:
-            result = {
-                "name": name,
-                **{k: v for k, v in company.items() if k != "name"},
-                "career_url": career_url,
-            }
-            results.append(result)
             print(f"   ✅ {career_url}")
+            # Update DB immediately via API
+            if update_career_url(company_id, slug, career_url):
+                print(f"   📝 Saved to DB")
+                found += 1
+            else:
+                print(f"   ⚠️  Found URL but failed to save")
+                found += 1  # Still count as found
         else:
             print(f"   ❌ No career URL in search results")
             skipped.append(name)
-
-    # ── Write results ──
-    if results:
-        write_results_js(results, OUTPUT_JS)
-    else:
-        print("\n⚠️  No results to write")
 
     # ── Summary ──
     print(f"\n{'=' * 50}")
     print(f"📊 Summary")
     print(f"   Total: {total}")
-    print(f"   Found: {len(results)}")
+    print(f"   Found: {found}")
     print(f"   Skipped: {len(skipped)}")
     if skipped:
-        for s in skipped:
+        for s in skipped[:20]:
             print(f"     • {s}")
+        if len(skipped) > 20:
+            print(f"     ... and {len(skipped) - 20} more")
 
 
 if __name__ == "__main__":

@@ -88,6 +88,7 @@ function App() {
           selectedCity={selectedCity}
           onCityChange={handleCityChange}
           onSearch={handleSearch}
+          onCompanySelect={handleCompanySelect}
           sidebarOpen={sidebarOpen}
           onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
           onRequestLocation={handleRequestLocation}
@@ -112,8 +113,8 @@ function App() {
             />
           </div>
 
-          {/* Map */}
-          <div className="flex-1 relative">
+          {/* Map — z-0 creates a stacking context so Leaflet's internal z-indexes don't bleed over the header */}
+          <div className="flex-1 relative z-0">
             <MapView
               selectedCity={selectedCity}
               onCompanySelect={handleCompanySelect}

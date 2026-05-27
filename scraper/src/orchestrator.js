@@ -1,22 +1,19 @@
 /**
- * Sequential Company Orchestrator
+ * Sequential Company Orchestrator — API-Driven
  * 
- * Processes companies one-by-one with the new pipeline:
+ * Reads companies with career URLs from the admin API, then for each company:
  * 1. Scrape all sources (ATS APIs + career pages + generic)
- * 2. ATS jobs → staging directly (trusted source)
- * 3. Career page / generic jobs → AI validation via Ollama → staging
- * 4. Atomic swap: delete old jobs → promote staging → cleanup
- * 5. Update hiring status + log metrics
+ * 2. ATS jobs → trusted (no AI needed)
+ * 3. Career page / generic jobs → collected
+ * 4. Bulk insert all jobs via admin API (which also indexes in Meilisearch)
  * 
- * Usage: node src/orchestrator.js
+ * Usage: cd scraper && npm run orchestrate
  */
-require('dotenv').config({ path: require('path').resolve(__dirname, '../../.env') });
+require('dotenv').config({ path: require('path').resolve(__dirname, '../.env') });
+
 const readline = require('readline');
+const axios = require('axios');
 const logger = require('./utils/logger');
-const companies = require('./companies');
-const storage = require('./storage');
-const db = require('./utils/db');
-const { validateJobs, isOllamaAvailable } = require('./services/ai-validator');
 
 // Scraper modules
 const greenhouseScraper = require('./scrapers/greenhouse');
@@ -25,22 +22,47 @@ const ashbyScraper = require('./scrapers/ashby');
 const genericScraper = require('./scrapers/generic');
 const { discoverCareerPage } = require('./discovery');
 
+// ─── Config ──────────────────────────────────────────────────────────────────
+const API_BASE = process.env.API_BASE_URL || 'http://localhost:3001';
+const TOKEN = process.env.ADMIN_API_TOKEN;
+
+const api = axios.create({
+  baseURL: API_BASE,
+  headers: { Authorization: `Bearer ${TOKEN}` },
+  timeout: 120000, // 2 min for bulk job insert
+});
+
 // ATS platforms that produce trusted, structured data (skip AI validation)
 const TRUSTED_ATS_PLATFORMS = new Set(['greenhouse', 'lever', 'ashby']);
 
 async function orchestrate() {
+  if (!TOKEN) {
+    logger.error('❌ ADMIN_API_TOKEN not set in .env');
+    process.exit(1);
+  }
+
+  // Fetch companies with career URLs from API
+  logger.info('📡 Fetching companies with career URLs from API...');
+  let companies;
+  try {
+    const res = await api.get('/api/admin/companies/with-career-url');
+    companies = res.data.companies;
+    logger.info(`   Found ${companies.length} companies with career URLs\n`);
+  } catch (err) {
+    logger.error(`❌ Failed to fetch companies: ${err.response?.data?.error || err.message}`);
+    process.exit(1);
+  }
+
+  if (companies.length === 0) {
+    logger.info('✅ No companies with career URLs to process.');
+    return;
+  }
+
   logger.info('═'.repeat(60));
-  logger.info('JobMap Orchestrator v3.0 — Parallel Pipeline');
+  logger.info('JobMap Orchestrator v4.0 — API-Driven Pipeline');
   logger.info(`Time: ${new Date().toISOString()}`);
   logger.info(`Companies: ${companies.length}`);
   logger.info('═'.repeat(60));
-
-  // Check Ollama availability upfront
-  const aiAvailable = await isOllamaAvailable();
-  if (!aiAvailable) {
-    logger.warn('⚠️  Ollama is not available — career page jobs will NOT be AI-validated');
-    logger.warn('   Start Ollama and pull qwen3:8b to enable AI filtering');
-  }
 
   const summary = {
     total: companies.length,
@@ -49,8 +71,6 @@ async function orchestrate() {
     totalJobsScraped: 0,
     totalAtsJobs: 0,
     totalGenericJobs: 0,
-    totalAiValidated: 0,
-    totalAiFiltered: 0,
     totalJobsSaved: 0,
     errors: [],
   };
@@ -86,22 +106,12 @@ async function orchestrate() {
       const startTime = Date.now();
 
       try {
-        await processCompany(company, aiAvailable, summary);
+        await processCompany(company, summary);
         summary.processed++;
       } catch (err) {
         summary.failed++;
         summary.errors.push({ company: company.name, error: err.message });
         logger.error(`${progress} ❌ Worker ${workerId + 1} FAILED: ${company.name} — ${err.message}`);
-
-        // Clean up staging on error
-        try {
-          const existing = await db('companies').where('slug', company.slug).first();
-          if (existing) {
-            await storage.clearCompanyStaging(existing.id);
-          }
-        } catch (cleanupErr) {
-          logger.error(`  Staging cleanup failed: ${cleanupErr.message}`);
-        }
       }
 
       const durationMs = Date.now() - startTime;
@@ -119,19 +129,17 @@ async function orchestrate() {
   printSummary(summary);
 
   // Cleanup
-  const browserPool = require('./utils/browser-pool');
-  await browserPool.shutdown();
-  await db.destroy();
+  try {
+    const browserPool = require('./utils/browser-pool');
+    await browserPool.shutdown();
+  } catch {}
 }
 
 /**
  * Process a single company through the full pipeline
  */
-async function processCompany(company, aiAvailable, summary) {
-  // Step 1: Upsert company + offices
-  const { companyId, cityToOfficeId } = await storage.upsertCompany(company);
-
-  // Step 2: Scrape all available sources
+async function processCompany(company, summary) {
+  // Scrape all available sources
   const { atsJobs, genericJobs, method } = await scrapeAllSources(company);
 
   summary.totalJobsScraped += atsJobs.length + genericJobs.length;
@@ -140,75 +148,50 @@ async function processCompany(company, aiAvailable, summary) {
 
   logger.info(`  📊 Scraped: ${atsJobs.length} ATS jobs, ${genericJobs.length} generic jobs`);
 
-  // Step 3: Stage ATS jobs directly (trusted)
-  if (atsJobs.length > 0) {
-    await storage.insertToStaging(atsJobs, companyId, cityToOfficeId, 'ats_api', 1.0);
-    logger.info(`  ✅ ${atsJobs.length} ATS jobs → staging (trusted, no AI needed)`);
+  // Combine all jobs
+  const allJobs = [];
+
+  // ATS jobs — trusted
+  for (const job of atsJobs) {
+    allJobs.push({
+      ...job,
+      source_type: 'ats_api',
+      ai_confidence: 1.0,
+    });
   }
 
-  // Step 4: AI validate generic/career page jobs
-  let validatedGenericJobs = [];
-  if (genericJobs.length > 0) {
-    // if (aiAvailable) {
-    //   validatedGenericJobs = await validateJobs(genericJobs, company.name);
-    //   const filtered = genericJobs.length - validatedGenericJobs.length;
-    //   summary.totalAiValidated += validatedGenericJobs.length;
-    //   summary.totalAiFiltered += filtered;
-    //   logger.info(`  🤖 AI validated: ${validatedGenericJobs.length} passed, ${filtered} filtered out`);
-    // } else {
+  // Generic/career page jobs
+  for (const job of genericJobs) {
+    allJobs.push({
+      ...job,
+      source_type: 'career_page',
+      ai_confidence: job.ai_confidence || 0.9,
+    });
+  }
 
+  if (allJobs.length === 0) {
+    logger.info(`  ℹ️  No jobs found for ${company.name}`);
+    return;
+  }
 
-    // No AI Needed — pass everything through with confidence cause this is extracted by Ai model only
-    validatedGenericJobs = genericJobs.map(j => ({ ...j, ai_confidence: 90, ai_is_active: true }));
-    logger.info(`  ⚠️  No AI Needed — all ${genericJobs.length} generic jobs passed through`);
+  // Bulk insert via API (handles dedup + Meilisearch indexing)
+  try {
+    const res = await api.post('/api/admin/jobs/bulk', {
+      company_id: company.id,
+      jobs: allJobs,
+    });
 
+    const { inserted, duplicates, active_job_count, errors } = res.data;
+    summary.totalJobsSaved += inserted;
+    logger.info(`  ✅ API: +${inserted} inserted, ~${duplicates} duplicates, ${active_job_count} active total`);
 
-    // }
-
-    if (validatedGenericJobs.length > 0) {
-      await storage.insertToStaging(
-        validatedGenericJobs,
-        companyId,
-        cityToOfficeId,
-        'career_page',
-        null // Individual confidence scores are already on each job
-      );
+    if (errors?.length) {
+      errors.forEach(e => logger.warn(`     ❌ ${e.title}: ${e.error}`));
     }
+  } catch (err) {
+    logger.error(`  ❌ Bulk job insert failed: ${err.response?.data?.error || err.message}`);
+    throw err;
   }
-
-  // Step 5: Atomic swap — staging → jobs table
-  const totalStaged = atsJobs.length + validatedGenericJobs.length;
-  if (totalStaged > 0) {
-    const { deleted, promoted } = await storage.swapCompanyJobs(companyId);
-    summary.totalJobsSaved += promoted;
-    logger.info(`  🔄 Swapped: deleted ${deleted} old jobs, promoted ${promoted} new jobs`);
-  } else {
-    // No new jobs found — just delete old ones
-    const deleted = await storage.deleteCompanyJobs(companyId);
-    if (deleted > 0) {
-      logger.info(`  🗑️  No new jobs found — deleted ${deleted} stale jobs`);
-    } else {
-      logger.info(`  ℹ️  No jobs found and none existed`);
-    }
-  }
-
-  // Step 6: Update hiring status
-  const { isHiring, jobCount } = await storage.updateHiringStatus(companyId);
-  logger.info(`  ${isHiring ? '✅' : '⬜'} ${jobCount} active jobs`);
-
-  // Step 7: Log scrape run
-  const durationMs = Date.now();
-  await storage.logScrapeRun({
-    companyId,
-    platform: company.ats_platform || 'generic',
-    jobsFound: atsJobs.length + genericJobs.length,
-    jobsInserted: totalStaged,
-    jobsUpdated: 0,
-    durationMs: 0, // Will be calculated by caller
-    method,
-    aiValidated: validatedGenericJobs.length,
-    aiFiltered: genericJobs.length - validatedGenericJobs.length,
-  });
 }
 
 /**
@@ -265,6 +248,14 @@ async function scrapeAllSources(company) {
         const jobs = await genericScraper.scrape(discoveredUrl, { forceDynamic: false, companyName: company.name });
         genericJobs.push(...jobs);
         method = 'discovery';
+
+        // Also save the discovered career URL to DB
+        try {
+          await api.patch(`/api/admin/companies/${company.slug}/career-url`, {
+            career_url: discoveredUrl,
+          });
+          logger.info(`  [Discovery] Saved career URL to DB`);
+        } catch {}
       } else {
         logger.info(`  [Discovery] No career page found`);
       }
@@ -289,8 +280,6 @@ function printSummary(summary) {
   logger.info(`  Total jobs scraped:   ${summary.totalJobsScraped}`);
   logger.info(`    ├─ ATS (trusted):   ${summary.totalAtsJobs}`);
   logger.info(`    └─ Generic/career:  ${summary.totalGenericJobs}`);
-  logger.info(`  AI validated:         ${summary.totalAiValidated}`);
-  logger.info(`  AI filtered out:      ${summary.totalAiFiltered}`);
   logger.info(`  Jobs saved to DB:     ${summary.totalJobsSaved}`);
 
   if (summary.errors.length > 0) {
@@ -302,7 +291,7 @@ function printSummary(summary) {
   logger.info('═'.repeat(60));
 }
 
-// ─── Entry Point ──────────────────────────────────────
+// ─── Entry Point ──────────────────────────────────────────────────────────────
 if (require.main === module) {
   orchestrate()
     .then(() => {
