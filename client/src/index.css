@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 /* ═══════════════════════════════════════════════════════════════════════════════
-   DESIGN SYSTEM — JOBMAP PREMIUM
+   DESIGN SYSTEM — GEOJOBS PREMIUM
    ═══════════════════════════════════════════════════════════════════════════════ */
 
 @theme {
@@ -278,7 +278,8 @@ html {
 
 /* Animated gradient bg */
 .animated-gradient {
-  background: linear-gradient(-45deg, #6366f1, #4f46e5, #06b6d4, #818cf8);
+  /* background: linear-gradient(-45deg, #6366f1, #4f46e5, #06b6d4, #818cf8); */
+  background: white;
   background-size: 300% 300%;
   animation: gradient-shift 6s ease infinite;
 }

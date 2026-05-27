@@ -67,7 +67,7 @@ async function tryCommonPaths(baseUrl) {
         timeout: 8000,
         maxRedirects: 3,
         validateStatus: (s) => s >= 200 && s < 400,
-        headers: { 'User-Agent': 'JobMap-Discovery/2.0' },
+        headers: { 'User-Agent': 'GeoJobs-Discovery/2.0' },
       });
       // Check if it's a real page (not just a redirect to homepage)
       const finalUrl = response.request?.res?.responseUrl || url;
@@ -95,7 +95,7 @@ async function parseSitemap(baseUrl) {
     try {
       const { data } = await axios.get(sitemapUrl, {
         timeout: 8000,
-        headers: { 'User-Agent': 'JobMap-Discovery/2.0' },
+        headers: { 'User-Agent': 'GeoJobs-Discovery/2.0' },
       });
 
       const $ = cheerio.load(data, { xmlMode: true });
@@ -127,7 +127,7 @@ async function crawlForCareerLinks(baseUrl) {
     const { data: html } = await axios.get(baseUrl, {
       timeout: 10000,
       headers: {
-        'User-Agent': 'JobMap-Discovery/2.0',
+        'User-Agent': 'GeoJobs-Discovery/2.0',
         'Accept': 'text/html',
       },
     });

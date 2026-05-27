@@ -123,7 +123,7 @@ router.get('/suggest', async (req, res) => {
     const [jobResults, companyResults] = await Promise.all([
       meili.index(JOBS_INDEX).search(q.trim(), {
         limit: 6,
-        attributesToRetrieve: ['id', 'title', 'company_name', 'city', 'work_type'],
+        attributesToRetrieve: ['id', 'title', 'company_name', 'company_id', 'company_slug', 'city', 'work_type'],
         filter: filters.join(' AND '),
       }),
       meili.index(COMPANIES_INDEX).search(q.trim(), {

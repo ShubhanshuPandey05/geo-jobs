@@ -1,6 +1,6 @@
-# Contributing to JobMap
+# Contributing to GeoJobs
 
-Thank you for your interest in contributing to JobMap! This guide will help you get started.
+Thank you for your interest in contributing to GeoJobs! This guide will help you get started.
 
 ## 📋 Table of Contents
 

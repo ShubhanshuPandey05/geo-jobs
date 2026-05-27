@@ -39,7 +39,7 @@ app.use((err, req, res, next) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`JobMap API running on http://localhost:${PORT}`);
+  console.log(`GeoJobs API running on http://localhost:${PORT}`);
 
   // Kick off Meilisearch sync in the background (non-blocking)
   const { fullSync } = require('./services/meiliSync');

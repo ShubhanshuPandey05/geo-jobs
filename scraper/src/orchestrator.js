@@ -9,7 +9,7 @@
  * 
  * Usage: cd scraper && npm run orchestrate
  */
-require('dotenv').config({ path: require('path').resolve(__dirname, '../.env') });
+require('dotenv').config({ path: require('path').resolve(__dirname, '../../.env') });
 
 const readline = require('readline');
 const axios = require('axios');
@@ -59,7 +59,7 @@ async function orchestrate() {
   }
 
   logger.info('═'.repeat(60));
-  logger.info('JobMap Orchestrator v4.0 — API-Driven Pipeline');
+  logger.info('GeoJobs Orchestrator v4.0 — API-Driven Pipeline');
   logger.info(`Time: ${new Date().toISOString()}`);
   logger.info(`Companies: ${companies.length}`);
   logger.info('═'.repeat(60));
@@ -132,7 +132,7 @@ async function orchestrate() {
   try {
     const browserPool = require('./utils/browser-pool');
     await browserPool.shutdown();
-  } catch {}
+  } catch { }
 }
 
 /**
@@ -255,7 +255,7 @@ async function scrapeAllSources(company) {
             career_url: discoveredUrl,
           });
           logger.info(`  [Discovery] Saved career URL to DB`);
-        } catch {}
+        } catch { }
       } else {
         logger.info(`  [Discovery] No career page found`);
       }

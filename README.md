@@ -1,5 +1,5 @@
 <p align="center">
-  <h1 align="center">🗺️ JobMap</h1>
+  <h1 align="center">🗺️ GeoJobs</h1>
   <p align="center">
     Discover tech jobs on an interactive map — scrape, search, explore.
   </p>
@@ -14,7 +14,7 @@
 
 ---
 
-JobMap is a full-stack platform that automatically discovers company career pages, scrapes job listings from ATS platforms and custom career sites, and displays them on a real-time interactive map with high-performance fuzzy search powered by Meilisearch.
+GeoJobs is a full-stack platform that automatically discovers company career pages, scrapes job listings from ATS platforms and custom career sites, and displays them on a real-time interactive map with high-performance fuzzy search powered by Meilisearch.
 
 ## ✨ Features
 
@@ -30,7 +30,7 @@ JobMap is a full-stack platform that automatically discovers company career page
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                         JobMap Platform                         │
+│                         GeoJobs Platform                        │
 ├──────────────┬──────────────┬──────────────┬────────────────────┤
 │   Client     │   Server     │   Scraper    │  Infrastructure    │
 │   (React)    │   (Express)  │   (Node.js)  │   (Docker)         │
@@ -247,11 +247,11 @@ job-seek/
 |----------|-------------|---------|
 | `DB_HOST` | PostgreSQL host | `localhost` |
 | `DB_PORT` | PostgreSQL port | `5433` |
-| `DB_NAME` | Database name | `jobmap` |
-| `DB_USER` | Database user | `jobmap` |
-| `DB_PASSWORD` | Database password | `jobmap_secret_123` |
+| `DB_NAME` | Database name | `geojobs` |
+| `DB_USER` | Database user | `geojobs` |
+| `DB_PASSWORD` | Database password | `geojobs_secret_123` |
 | `MEILI_HOST` | Meilisearch URL | `http://localhost:7700` |
-| `MEILI_MASTER_KEY` | Meilisearch API key | `jobmap_meili_master_key_123` |
+| `MEILI_MASTER_KEY` | Meilisearch API key | `geojobs_meili_master_key_123` |
 | `ADMIN_API_TOKEN` | Token for admin API routes | *(generate random)* |
 | `API_BASE_URL` | Server URL (for scraper scripts) | `http://localhost:3001` |
 | `PORT` | Server port | `3001` |

@@ -1,5 +1,5 @@
 /**
- * JobMap Scraper — Main Entry Point
+ * GeoJobs Scraper — Main Entry Point
  * Orchestrates the scraping pipeline:
  * 1. Seeds companies from the company list
  * 2. Enqueues scrape jobs via BullMQ
@@ -14,7 +14,7 @@ const db = require('./utils/db');
 
 async function main() {
   logger.info('='.repeat(60));
-  logger.info('JobMap Scraper v2.0 — Starting');
+  logger.info('GeoJobs Scraper v2.0 — Starting');
   logger.info(`Time: ${new Date().toISOString()}`);
   logger.info(`Companies: ${companies.length}`);
   logger.info('='.repeat(60));

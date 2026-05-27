@@ -1,24 +1,24 @@
 services:
   postgres:
     image: postgis/postgis:16-3.4
-    container_name: jobmap-postgres
+    container_name: geojobs-postgres
     environment:
-      POSTGRES_DB: jobmap
-      POSTGRES_USER: jobmap
-      POSTGRES_PASSWORD: jobmap_secret_123
+      POSTGRES_DB: geojobs
+      POSTGRES_USER: geojobs
+      POSTGRES_PASSWORD: geojobs_secret_123
     ports:
       - "5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U jobmap"]
+      test: ["CMD-SHELL", "pg_isready -U geojobs"]
       interval: 5s
       timeout: 5s
       retries: 5
 
   redis:
     image: redis:7-alpine
-    container_name: jobmap-redis
+    container_name: geojobs-redis
     ports:
       - "6379:6379"
     volumes:
@@ -33,9 +33,9 @@ services:
   # ─── Meilisearch (fast fuzzy search engine) ───────────
   meilisearch:
     image: getmeili/meilisearch:v1.12
-    container_name: jobmap-meilisearch
+    container_name: geojobs-meilisearch
     environment:
-      MEILI_MASTER_KEY: jobmap_meili_master_key_123
+      MEILI_MASTER_KEY: geojobs_meili_master_key_123
       MEILI_ENV: development
       MEILI_LOG_LEVEL: INFO
     ports:
@@ -54,13 +54,13 @@ services:
     build:
       context: ./scraper
       dockerfile: Dockerfile
-    container_name: jobmap-scraper
+    container_name: geojobs-scraper
     environment:
       DB_HOST: postgres
       DB_PORT: 5432
-      DB_NAME: jobmap
-      DB_USER: jobmap
-      DB_PASSWORD: jobmap_secret_123
+      DB_NAME: geojobs
+      DB_USER: geojobs
+      DB_PASSWORD: geojobs_secret_123
       REDIS_HOST: redis
       REDIS_PORT: 6379
       SCRAPER_CONCURRENCY: 5

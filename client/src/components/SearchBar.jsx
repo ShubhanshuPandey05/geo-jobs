@@ -126,6 +126,12 @@ export default function SearchBar({ selectedCity, onSearch, onCompanySelect }) {
         slug: item.data.slug,
         name: item.data.name,
       });
+    } else if (item.type === 'job') {
+      onCompanySelect?.({
+        id: item.data.company_id,
+        slug: item.data.company_slug,
+        name: item.data.company_name,
+      });
     } else {
       setQuery(item.data.title);
       onSearch(item.data.title);
@@ -224,11 +230,10 @@ export default function SearchBar({ selectedCity, onSearch, onCompanySelect }) {
                     <button
                       key={`company-${company.id}`}
                       onClick={() => handleItemSelect({ type: 'company', data: company })}
-                      className={`w-full flex items-center gap-3 px-4 py-2.5 text-left transition-all duration-150 ${
-                        activeIndex === globalIdx
-                          ? 'bg-primary/10 border-l-2 border-primary'
-                          : 'hover:bg-surface-light/60 border-l-2 border-transparent'
-                      }`}
+                      className={`w-full flex items-center gap-3 px-4 py-2.5 text-left transition-all duration-150 ${activeIndex === globalIdx
+                        ? 'bg-primary/10 border-l-2 border-primary'
+                        : 'hover:bg-surface-light/60 border-l-2 border-transparent'
+                        }`}
                     >
                       {company.logo_url ? (
                         <img
@@ -279,11 +284,10 @@ export default function SearchBar({ selectedCity, onSearch, onCompanySelect }) {
                     <button
                       key={`job-${job.id}`}
                       onClick={() => handleItemSelect({ type: 'job', data: job })}
-                      className={`w-full flex items-center gap-3 px-4 py-2.5 text-left transition-all duration-150 ${
-                        activeIndex === globalIdx
-                          ? 'bg-primary/10 border-l-2 border-primary'
-                          : 'hover:bg-surface-light/60 border-l-2 border-transparent'
-                      }`}
+                      className={`w-full flex items-center gap-3 px-4 py-2.5 text-left transition-all duration-150 ${activeIndex === globalIdx
+                        ? 'bg-primary/10 border-l-2 border-primary'
+                        : 'hover:bg-surface-light/60 border-l-2 border-transparent'
+                        }`}
                     >
                       <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-accent/15 to-warning/15 flex items-center justify-center shrink-0">
                         <Briefcase size={14} className="text-accent" />
@@ -301,13 +305,12 @@ export default function SearchBar({ selectedCity, onSearch, onCompanySelect }) {
                           )}
                           {job.work_type && (
                             <span
-                              className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${
-                                job.work_type === 'remote'
-                                  ? 'bg-remote/15 text-remote'
-                                  : job.work_type === 'hybrid'
+                              className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${job.work_type === 'remote'
+                                ? 'bg-remote/15 text-remote'
+                                : job.work_type === 'hybrid'
                                   ? 'bg-hybrid/15 text-hybrid'
                                   : 'bg-onsite/15 text-onsite'
-                              }`}
+                                }`}
                             >
                               {job.work_type}
                             </span>

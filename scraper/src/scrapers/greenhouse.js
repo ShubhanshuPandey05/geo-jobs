@@ -15,7 +15,7 @@ async function scrape(identifier, options = {}) {
   try {
     const { data } = await axios.get(url, {
       timeout: 15000,
-      headers: { 'User-Agent': 'JobMap-Scraper/2.0' },
+      headers: { 'User-Agent': 'GeoJobs-Scraper/2.0' },
     });
 
     if (!data.jobs || !Array.isArray(data.jobs)) {

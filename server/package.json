@@ -1,7 +1,7 @@
 {
-  "name": "jobmap-server",
+  "name": "geojobs-server",
   "version": "1.0.0",
-  "description": "JobMap Backend API",
+  "description": "GeoJobs Backend API",
   "main": "src/app.js",
   "scripts": {
     "dev": "nodemon src/app.js",

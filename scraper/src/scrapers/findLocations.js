@@ -7,7 +7,7 @@
  * 
  * Usage: cd scraper && npm run findlocations
  */
-require('dotenv').config({ path: require('path').resolve(__dirname, '../../.env') });
+require('dotenv').config({ path: require('path').resolve(__dirname, '../../../.env') });
 
 const { chromium } = require('playwright');
 const axios = require('axios');

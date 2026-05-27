@@ -55,9 +55,7 @@ router.post('/companies/bulk', async (req, res) => {
         if (ats_platform) fields.ats_platform = ats_platform;
         if (ats_identifier) fields.ats_identifier = ats_identifier;
 
-        // Remove fields that don't exist in the DB schema
-        delete fields.ats_platform;
-        delete fields.ats_identifier;
+        // ats_platform and ats_identifier are preserved because they exist in the DB schema
 
         let company = await db('companies').where('slug', slug).first();
         if (company) {
@@ -310,8 +308,7 @@ router.get('/companies/with-career-url', async (req, res) => {
   try {
     const companies = await db('companies as c')
       .select('c.*')
-      .whereNotNull('c.career_url')
-      .where('c.career_url', '!=', '')
+      .whereRaw("(c.career_url IS NOT NULL AND c.career_url != '') OR (c.ats_platform IS NOT NULL AND c.ats_platform != '')")
       .orderBy('c.name');
 
     // Get offices for each company

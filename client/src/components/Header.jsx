@@ -34,11 +34,12 @@ export default function Header({
       {/* Logo */}
       <div className="flex items-center gap-2.5 mr-1">
         <div className="w-9 h-9 rounded-xl animated-gradient flex items-center justify-center shadow-lg shadow-primary/20">
-          <MapPin size={17} className="text-white drop-shadow-sm" />
+          {/* <MapPin size={17} className="text-white drop-shadow-sm" /> */}
+          <img src="/logo.png" alt="Logo" className="h-8" />
         </div>
         <div>
           <h1 className="text-[15px] font-extrabold leading-tight gradient-text tracking-tight">
-            JobMap
+            GeoJobs
           </h1>
           <p className="text-[9px] text-text-muted leading-none font-medium tracking-wide uppercase">
             Discover nearby
