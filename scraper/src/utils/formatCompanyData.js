@@ -72,27 +72,4 @@ function transform(companies) {
     });
 }
 
-// const transformed = transform(companies);
-// console.log(JSON.stringify(transformed, null, 2));
-
-// // Also print as JS object literal (matching your target format)
-// console.log("\n\n// --- JS Object Literal Format ---\n");
-// transformed.forEach(c => {
-//     console.log(`  {`);
-//     console.log(`    name: '${c.name}',`);
-//     console.log(`    slug: '${c.slug}',`);
-//     console.log(`    website: '${c.website}',`);
-//     console.log(`    description: '${c.description}',`);
-//     console.log(`    industry: '${c.industry}',`);
-//     console.log(`    employee_count: ${c.employee_count},`);
-//     console.log(`    founded_year: '${c.founded_year}',`);
-//     console.log(`    offices: [`);
-//     c.offices.forEach(o => {
-//         console.log(`      { city: '${o.city}', state: '${o.state}', is_hq: ${o.is_hq} },`);
-//     });
-//     console.log(`    ],`);
-//     console.log(`  },`);
-// });
-
-
 module.exports = { transform }
