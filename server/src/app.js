@@ -38,4 +38,14 @@ app.use((err, req, res, next) => {
 
 app.listen(PORT, () => {
   console.log(`JobMap API running on http://localhost:${PORT}`);
+
+  // Kick off Meilisearch sync in the background (non-blocking)
+  const { fullSync } = require('./services/meiliSync');
+  fullSync()
+    .then((result) => {
+      console.log(`[Startup] Meilisearch sync complete: ${result.jobCount} jobs, ${result.companyCount} companies in ${result.elapsed}s`);
+    })
+    .catch((err) => {
+      console.warn('[Startup] Meilisearch sync failed (search will use stale data):', err.message);
+    });
 });

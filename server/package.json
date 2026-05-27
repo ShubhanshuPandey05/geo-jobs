@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "nodemon src/app.js",
     "start": "node src/app.js",
+    "meili:sync": "node src/services/meiliSync.js",
     "migrate": "knex migrate:latest --knexfile src/config/knexfile.js",
     "migrate:rollback": "knex migrate:rollback --knexfile src/config/knexfile.js",
     "seed": "knex seed:run --knexfile src/config/knexfile.js"
@@ -16,6 +17,7 @@
     "express": "^4.21.0",
     "helmet": "^7.1.0",
     "knex": "^3.1.0",
+    "meilisearch": "^0.58.0",
     "morgan": "^1.10.0",
     "pg": "^8.12.0"
   },
