@@ -17,7 +17,7 @@ const { transform } = require('./utils/formatCompanyData');
 
 const API_BASE = process.env.API_BASE_URL || 'http://localhost:3001';
 const TOKEN = process.env.ADMIN_API_TOKEN;
-const DATA_FILE = path.resolve(__dirname, '../data/all-companies.json');
+const DATA_FILE = path.resolve(__dirname, '../data/techbehemoths-companies.json');
 
 const BATCH_SIZE = 50;
 

@@ -86,8 +86,8 @@ export default function Sidebar({
               <button
                 onClick={() => setViewMode('list')}
                 className={`p-1.5 rounded-md transition-all ${viewMode === 'list'
-                    ? 'bg-primary/15 text-primary-light'
-                    : 'text-text-muted hover:text-text-secondary'
+                  ? 'bg-primary/15 text-primary-light'
+                  : 'text-text-muted hover:text-text-secondary'
                   }`}
               >
                 <LayoutList size={13} />
@@ -95,8 +95,8 @@ export default function Sidebar({
               <button
                 onClick={() => setViewMode('grid')}
                 className={`p-1.5 rounded-md transition-all ${viewMode === 'grid'
-                    ? 'bg-primary/15 text-primary-light'
-                    : 'text-text-muted hover:text-text-secondary'
+                  ? 'bg-primary/15 text-primary-light'
+                  : 'text-text-muted hover:text-text-secondary'
                   }`}
               >
                 <LayoutGrid size={13} />
@@ -134,8 +134,8 @@ export default function Sidebar({
           <button
             onClick={() => setShowFilters(!showFilters)}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all duration-300 ${showFilters || activeFilterCount > 0
-                ? 'bg-primary/15 text-primary-light border border-primary/25 shadow-sm shadow-primary/5'
-                : 'bg-surface-light/60 text-text-muted hover:text-text-secondary hover:bg-surface-lighter/40 border border-transparent'
+              ? 'bg-primary/15 text-primary-light border border-primary/25 shadow-sm shadow-primary/5'
+              : 'bg-surface-light/60 text-text-muted hover:text-text-secondary hover:bg-surface-lighter/40 border border-transparent'
               }`}
           >
             <Filter size={12} />
@@ -174,14 +174,14 @@ export default function Sidebar({
                     key={type}
                     onClick={() => handleFilterUpdate('work_type', type)}
                     className={`flex-1 px-2 py-1.5 rounded-xl text-[11px] font-semibold transition-all duration-200 ${localFilters.work_type === type
-                        ? type === 'remote'
-                          ? 'bg-remote/15 text-remote border border-remote/25'
-                          : type === 'hybrid'
-                            ? 'bg-hybrid/15 text-hybrid border border-hybrid/25'
-                            : type === 'onsite'
-                              ? 'bg-onsite/15 text-onsite border border-onsite/25'
-                              : 'bg-primary/15 text-primary-light border border-primary/25'
-                        : 'bg-surface-light/40 text-text-muted hover:text-text-secondary border border-transparent hover:border-border-light'
+                      ? type === 'remote'
+                        ? 'bg-remote/15 text-remote border border-remote/25'
+                        : type === 'hybrid'
+                          ? 'bg-hybrid/15 text-hybrid border border-hybrid/25'
+                          : type === 'onsite'
+                            ? 'bg-onsite/15 text-onsite border border-onsite/25'
+                            : 'bg-primary/15 text-primary-light border border-primary/25'
+                      : 'bg-surface-light/40 text-text-muted hover:text-text-secondary border border-transparent hover:border-border-light'
                       }`}
                   >
                     {type || 'All'}

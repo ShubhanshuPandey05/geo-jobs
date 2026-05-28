@@ -33,9 +33,9 @@ if ENV_PATH.exists():
             key, _, value = line.partition("=")
             os.environ.setdefault(key.strip(), value.strip())
 
-API_BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:3001")
+API_BASE_URL = os.environ.get("API_BASE_URL", "")
 ADMIN_TOKEN = os.environ.get("ADMIN_API_TOKEN", "")
-MODAL_API_URL = "https://webdevshubhanshu--qwen3-agent-api-chat.modal.run"
+MODAL_API_URL = os.environ.get("MODAL_API_URL", "")
 
 
 def get_companies_without_career_url() -> list[dict]:
@@ -169,6 +169,21 @@ def main():
 
     if dry_run:
         print("\n🔍 Dry run — no API calls made")
+        return
+
+    # ── Ask how many to skip ──
+    try:
+        skip_input = input(f"\n⏭️  Skip how many from the start? (0 to start fresh): ").strip()
+        skip_count = int(skip_input) if skip_input else 0
+    except (ValueError, EOFError):
+        skip_count = 0
+
+    if skip_count > 0:
+        companies = companies[skip_count:]
+        print(f"   Skipping first {skip_count}, starting from #{skip_count + 1}")
+
+    if not companies:
+        print("✅ Nothing left to process after skipping!")
         return
 
     print(f"\n🔗 Modal Endpoint: {MODAL_API_URL}")

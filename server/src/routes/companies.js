@@ -5,7 +5,7 @@ const db = require('../config/db');
 // GET /api/companies — list companies with optional geo filter
 router.get('/', async (req, res) => {
   try {
-    const { lat, lng, radius = 50000, city, industry, page = 1, limit = 50 } = req.query;
+    const { lat, lng, radius = 50000, city, industry, page = 1, limit = 999999 } = req.query;
     const offset = (page - 1) * limit;
 
     let query = db('companies as c')

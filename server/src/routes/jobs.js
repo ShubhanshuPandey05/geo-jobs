@@ -8,7 +8,7 @@ router.get('/', async (req, res) => {
     const {
       city, work_type, department, salary_min, salary_max,
       experience_min, experience_max, company_id,
-      page = 1, limit = 25, sort = 'posted_at'
+      page = 1, limit = 999999, sort = 'posted_at'
     } = req.query;
     const offset = (page - 1) * limit;
 

@@ -1,11 +1,12 @@
 /**
- * Location Scraper — API-Driven
+ * Location Scraper — API-Driven (Concurrent)
  * 
  * Fetches companies without coordinates from the admin API,
  * scrapes their location from Google Maps using Playwright,
  * and batch-updates the coordinates via the API.
  * 
  * Usage: cd scraper && npm run findlocations
+ *   or:  node src/scrapers/findLocations.js --concurrency 10
  */
 require('dotenv').config({ path: require('path').resolve(__dirname, '../../../.env') });
 
@@ -15,6 +16,13 @@ const axios = require('axios');
 const API_BASE = process.env.API_BASE_URL || 'http://localhost:3001';
 const TOKEN = process.env.ADMIN_API_TOKEN;
 const BATCH_SIZE = 10; // Send location updates in batches of 10
+
+// Parse --concurrency flag from CLI args (default: 5)
+const CONCURRENCY = (() => {
+  const idx = process.argv.indexOf('--concurrency');
+  if (idx !== -1 && process.argv[idx + 1]) return parseInt(process.argv[idx + 1], 10);
+  return 5;
+})();
 
 const api = axios.create({
   baseURL: API_BASE,
@@ -41,6 +49,52 @@ async function getCoordinates(page, companyName, city, state) {
   };
 }
 
+// ─── Worker: each worker owns one browser tab ─────────────────────────────────
+async function worker(workerId, browser, tasks, locationUpdates, stats) {
+  let page = await browser.newPage();
+
+  while (true) {
+    const task = tasks.shift();
+    if (!task) break; // queue empty
+
+    const { index, total, company } = task;
+    const city = company.offices?.[0]?.city || '';
+    const state = company.offices?.[0]?.state || '';
+
+    try {
+      console.log(`[W${workerId}] [${index}/${total}] 📍 ${company.name}...`);
+      const coords = await getCoordinates(page, company.name, city, state);
+      console.log(`[W${workerId}]    ✅ ${coords.latitude}, ${coords.longitude}`);
+
+      locationUpdates.push({
+        company_id: company.id,
+        slug: company.slug,
+        city: city || company.name,
+        latitude: coords.latitude,
+        longitude: coords.longitude,
+        state: state || null,
+      });
+      stats.success++;
+
+      // Batch flush when buffer is large enough
+      if (locationUpdates.length >= BATCH_SIZE) {
+        await flushLocationUpdates(locationUpdates);
+      }
+    } catch (err) {
+      console.log(`[W${workerId}]    ❌ ${err.message}`);
+      stats.failed++;
+
+      // If the page crashed, create a fresh one
+      if (err.message.includes('closed') || err.message.includes('crashed')) {
+        try { await page.close(); } catch (_) { }
+        page = await browser.newPage();
+      }
+    }
+  }
+
+  try { await page.close(); } catch (_) { }
+}
+
 // ─── Main ──────────────────────────────────────────────────────────────────────
 async function main() {
   if (!TOKEN) {
@@ -65,48 +119,27 @@ async function main() {
     return;
   }
 
-  // Step 2: Launch browser and scrape coordinates
-  console.log('🚀 Launching browser...');
+  // Step 2: Build task queue
+  const tasks = companies.map((company, i) => ({
+    index: i + 1,
+    total: companies.length,
+    company,
+  }));
+
+  const locationUpdates = []; // Shared buffer (safe — JS is single-threaded)
+  const stats = { success: 0, failed: 0 };
+
+  // Step 3: Launch browser & spin up workers
+  const actualConcurrency = Math.min(CONCURRENCY, companies.length);
+  console.log(`🚀 Launching browser with ${actualConcurrency} concurrent tabs...\n`);
   const browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage();
 
-  const locationUpdates = []; // Buffer for batch updates
-  let success = 0;
-  let failed = 0;
-
-  for (let i = 0; i < companies.length; i++) {
-    const company = companies[i];
-    const progress = `[${i + 1}/${companies.length}]`;
-    const city = company.offices?.[0]?.city || '';
-    const state = company.offices?.[0]?.state || '';
-
-    try {
-      console.log(`${progress} 📍 ${company.name}...`);
-      const coords = await getCoordinates(page, company.name, city, state);
-      console.log(`   ✅ ${coords.latitude}, ${coords.longitude}`);
-
-      locationUpdates.push({
-        company_id: company.id,
-        slug: company.slug,
-        city: city || company.name, // fallback city name
-        latitude: coords.latitude,
-        longitude: coords.longitude,
-        state: state || null,
-      });
-      success++;
-
-      // Batch update every BATCH_SIZE companies
-      if (locationUpdates.length >= BATCH_SIZE) {
-        await flushLocationUpdates(locationUpdates);
-      }
-
-      // Rate limiting
-      await page.waitForTimeout(1000 + Math.random() * 500);
-    } catch (err) {
-      console.log(`   ❌ ${err.message}`);
-      failed++;
-    }
+  const workers = [];
+  for (let i = 0; i < actualConcurrency; i++) {
+    workers.push(worker(i + 1, browser, tasks, locationUpdates, stats));
   }
+
+  await Promise.all(workers);
 
   // Flush remaining updates
   if (locationUpdates.length > 0) {
@@ -118,9 +151,10 @@ async function main() {
   // Summary
   console.log(`\n${'═'.repeat(50)}`);
   console.log(`📊 Location Scraping Summary`);
-  console.log(`   Total:    ${companies.length}`);
-  console.log(`   Success:  ${success}`);
-  console.log(`   Failed:   ${failed}`);
+  console.log(`   Concurrency: ${actualConcurrency} tabs`);
+  console.log(`   Total:       ${companies.length}`);
+  console.log(`   Success:     ${stats.success}`);
+  console.log(`   Failed:      ${stats.failed}`);
   console.log(`${'═'.repeat(50)}`);
 }
 
