@@ -10,11 +10,13 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@posthog/react": "^1.9.1",
     "@tanstack/react-query": "^5.100.9",
     "axios": "^1.16.0",
     "leaflet": "^1.9.4",
     "lucide-react": "^1.14.0",
     "mapbox-gl": "^3.23.1",
+    "posthog-js": "^1.376.3",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "react-leaflet": "^5.0.0",
