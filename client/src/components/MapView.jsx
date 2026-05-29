@@ -205,7 +205,7 @@ export default function MapView({ selectedCity, onCompanySelect, selectedCompany
       spiderfyOnMaxZoom: true,
       showCoverageOnHover: false,
       zoomToBoundsOnClick: true,
-      disableClusteringAtZoom: 16,
+      disableClusteringAtZoom: 11,
       chunkedLoading: true,
       chunkInterval: 100,
       chunkDelay: 10,
