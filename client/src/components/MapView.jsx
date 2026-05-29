@@ -6,12 +6,15 @@ import { fetchMapMarkers } from '../services/api';
 // ─── Leaflet imports ─────────────────────────────────────────────────────────
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import 'leaflet.markercluster';
+import 'leaflet.markercluster/dist/MarkerCluster.css';
+import 'leaflet.markercluster/dist/MarkerCluster.Default.css';
 import './map.css';
 
 export default function MapView({ selectedCity, onCompanySelect, selectedCompany, onMapLoad, userLocation, theme, showAllCompanies, onToggleShowAll }) {
   const mapContainer = useRef(null);
   const map = useRef(null);
-  const markersRef = useRef([]);
+  const clusterGroupRef = useRef(null);
   const userMarkerRef = useRef(null);
   const tileLayerRef = useRef(null);
   const tempMarkerRef = useRef(null);
@@ -184,18 +187,45 @@ export default function MapView({ selectedCity, onCompanySelect, selectedCompany
     }, 1600);
   }, [userLocation]);
 
-  // ─── Render company markers ──────────────────────────────────────────────
+  // ─── Render company markers (CLUSTERED) ─────────────────────────────────
   useEffect(() => {
     if (!map.current) return;
 
-    // Clear existing markers
-    markersRef.current.forEach((m) => m.remove());
-    markersRef.current = [];
+    // Remove previous cluster group
+    if (clusterGroupRef.current) {
+      map.current.removeLayer(clusterGroupRef.current);
+      clusterGroupRef.current = null;
+    }
 
     if (!visibleMarkers.length) return;
 
-    visibleMarkers.forEach((company) => {
+    // Create cluster group with custom styling
+    const clusterGroup = L.markerClusterGroup({
+      maxClusterRadius: 50,
+      spiderfyOnMaxZoom: true,
+      showCoverageOnHover: false,
+      zoomToBoundsOnClick: true,
+      disableClusteringAtZoom: 16,
+      chunkedLoading: true,
+      chunkInterval: 100,
+      chunkDelay: 10,
+      iconCreateFunction: (cluster) => {
+        const count = cluster.getChildCount();
+        let size = 'small';
+        let radius = 36;
+        if (count > 50) { size = 'large'; radius = 50; }
+        else if (count > 20) { size = 'medium'; radius = 42; }
 
+        return L.divIcon({
+          html: `<div class="cluster-marker cluster-marker--${size}">${count}</div>`,
+          className: '',
+          iconSize: [radius, radius],
+          iconAnchor: [radius / 2, radius / 2],
+        });
+      },
+    });
+
+    const markers = visibleMarkers.map((company) => {
       // Color by industry
       const colors = {
         Fintech: ['#6366f1', '#8b5cf6'],
@@ -243,13 +273,11 @@ export default function MapView({ selectedCity, onCompanySelect, selectedCompany
       const marker = L.marker(
         [parseFloat(company.latitude), parseFloat(company.longitude)],
         { icon }
-      )
-        .bindPopup(popupContent, {
-          maxWidth: 300,
-          closeButton: true,
-          className: 'leaflet-dark-popup',
-        })
-        .addTo(map.current);
+      ).bindPopup(popupContent, {
+        maxWidth: 300,
+        closeButton: true,
+        className: 'leaflet-dark-popup',
+      });
 
       marker.on('click', () => {
         map.current.flyTo(
@@ -259,8 +287,12 @@ export default function MapView({ selectedCity, onCompanySelect, selectedCompany
         );
       });
 
-      markersRef.current.push(marker);
+      return marker;
     });
+
+    clusterGroup.addLayers(markers);
+    map.current.addLayer(clusterGroup);
+    clusterGroupRef.current = clusterGroup;
 
     // Global handler for popup button clicks
     window.__selectCompany__ = (slug, name, industry, cityName) => {

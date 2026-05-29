@@ -33,9 +33,19 @@
     0 0 0 6px rgba(99, 102, 241, 0.2);
 }
 
+/* Override default markercluster styles */
+.marker-cluster-small,
+.marker-cluster-medium,
+.marker-cluster-large {
+  background: none !important;
+}
+.marker-cluster-small div,
+.marker-cluster-medium div,
+.marker-cluster-large div {
+  background: none !important;
+}
+
 .cluster-marker {
-  width: 48px;
-  height: 48px;
   border-radius: 50%;
   background: linear-gradient(135deg, var(--color-primary-dark), var(--color-primary));
   border: 2.5px solid rgba(255, 255, 255, 0.2);
@@ -43,11 +53,27 @@
   align-items: center;
   justify-content: center;
   font-weight: 800;
-  font-size: 14px;
   color: white;
   cursor: pointer;
-  box-shadow: 0 4px 24px rgba(99, 102, 241, 0.5);
   transition: transform 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.cluster-marker--small {
+  font-size: 12px;
+  box-shadow: 0 4px 16px rgba(99, 102, 241, 0.4);
+}
+
+.cluster-marker--medium {
+  font-size: 14px;
+  box-shadow: 0 4px 24px rgba(99, 102, 241, 0.5);
+  background: linear-gradient(135deg, #4f46e5, #6366f1);
+}
+
+.cluster-marker--large {
+  font-size: 16px;
+  box-shadow: 0 6px 30px rgba(99, 102, 241, 0.6);
+  background: linear-gradient(135deg, #3730a3, #4f46e5);
+  border-color: rgba(255, 255, 255, 0.3);
 }
 
 .cluster-marker:hover {
