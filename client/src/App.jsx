@@ -4,6 +4,7 @@ import MapView from './components/MapView';
 import Sidebar from './components/Sidebar';
 import CompanyDetail from './components/CompanyDetail';
 import LocationModal from './components/LocationModal';
+import WelcomePopup from './components/WelcomePopup';
 
 function App() {
   const [selectedCompany, setSelectedCompany] = useState(null);
@@ -15,6 +16,10 @@ function App() {
   const [showLocationModal, setShowLocationModal] = useState(false);
   const [userLocation, setUserLocation] = useState(null);
   const [theme, setTheme] = useState('dark');
+  const [showWelcome, setShowWelcome] = useState(() => {
+    return !sessionStorage.getItem('geojobs_welcomed');
+  });
+  const [showAllCompanies, setShowAllCompanies] = useState(false);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -122,6 +127,8 @@ function App() {
               onMapLoad={setMapRef}
               userLocation={userLocation}
               theme={theme}
+              showAllCompanies={showAllCompanies}
+              onToggleShowAll={() => setShowAllCompanies(prev => !prev)}
             />
           </div>
 
@@ -142,6 +149,17 @@ function App() {
         <LocationModal
           onClose={() => setShowLocationModal(false)}
           onLocationSet={handleLocationSet}
+        />
+      )}
+
+      {/* Welcome Popup */}
+      {showWelcome && (
+        <WelcomePopup
+          onComplete={(showAll) => {
+            setShowAllCompanies(showAll);
+            setShowWelcome(false);
+            sessionStorage.setItem('geojobs_welcomed', '1');
+          }}
         />
       )}
     </div>

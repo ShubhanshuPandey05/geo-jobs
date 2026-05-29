@@ -8,7 +8,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import './map.css';
 
-export default function MapView({ selectedCity, onCompanySelect, selectedCompany, onMapLoad, userLocation, theme }) {
+export default function MapView({ selectedCity, onCompanySelect, selectedCompany, onMapLoad, userLocation, theme, showAllCompanies, onToggleShowAll }) {
   const mapContainer = useRef(null);
   const map = useRef(null);
   const markersRef = useRef([]);
@@ -52,10 +52,12 @@ export default function MapView({ selectedCity, onCompanySelect, selectedCompany
     if (!markerData?.data) return [];
 
     return markerData.data.filter((company) => {
+      if (!company.latitude || !company.longitude) return false;
+      if (showAllCompanies) return true;
       const jobCount = Number(company.job_count || 0);
-      return jobCount > 0 && company.latitude && company.longitude;
+      return jobCount > 0;
     });
-  }, [markerData]);
+  }, [markerData, showAllCompanies]);
 
   const clearTempMarker = useCallback(() => {
     if (tempMarkerTimeoutRef.current) {
@@ -341,6 +343,19 @@ export default function MapView({ selectedCity, onCompanySelect, selectedCompany
           )}
         </div>
       )}
+
+      {/* Show All Companies Toggle */}
+      <label className="map-toggle-chip" htmlFor="showAllToggle">
+        <input
+          type="checkbox"
+          id="showAllToggle"
+          checked={showAllCompanies}
+          onChange={onToggleShowAll}
+          className="map-toggle-checkbox"
+        />
+        <span className="map-toggle-checkmark" />
+        <span className="map-toggle-label">Show all companies</span>
+      </label>
     </div>
   );
 }

@@ -37,7 +37,7 @@ export default function SearchBar({ selectedCity, onSearch, onCompanySelect }) {
 
       setIsLoading(true);
       try {
-        const result = await fetchSuggestions(q.trim(), selectedCity);
+        const result = await fetchSuggestions(q.trim());
         setSuggestions(result.suggestions);
         setProcessingTime(result.processingTimeMs);
         setIsOpen(true);
