@@ -185,11 +185,11 @@ export default function SearchBar({ selectedCity, onSearch, onCompanySelect }) {
         </div>
       </div>
 
-      {/* Dropdown */}
+      {/* Dropdown — on mobile it stretches to near-full viewport width */}
       {isOpen && (
         <div
           ref={dropdownRef}
-          className="absolute top-full left-0 right-0 mt-2 bg-surface border border-border-light rounded-2xl shadow-2xl shadow-black/30 overflow-hidden z-[100] animate-slide-up md:max-h-[420px]"
+          className="search-suggestions-dropdown bg-surface border border-border-light rounded-2xl shadow-2xl shadow-black/30 overflow-hidden z-[100] animate-slide-up"
           style={{ maxHeight: 'min(420px, calc(100vh - 120px))' }}
         >
           {/* Speed indicator */}

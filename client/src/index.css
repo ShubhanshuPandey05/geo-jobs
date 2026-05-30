@@ -329,3 +329,22 @@ html {
 .stagger-item:nth-child(10) {
   animation-delay: 0.20s;
 }
+
+/* ─── Search suggestions dropdown ─────────────────────────────────────────── */
+.search-suggestions-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin-top: 8px;
+}
+
+@media (max-width: 767px) {
+  .search-suggestions-dropdown {
+    position: fixed;
+    top: 64px;
+    left: 12px;
+    right: 12px;
+    margin-top: 0;
+  }
+}
