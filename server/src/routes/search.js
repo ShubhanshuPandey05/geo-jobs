@@ -25,7 +25,7 @@ router.get('/', async (req, res) => {
       work_type,
       type = 'all',
       page = 1,
-      limit = 25,
+      limit = 999999,
       sort,
     } = req.query;
 
@@ -122,12 +122,12 @@ router.get('/suggest', async (req, res) => {
 
     const [jobResults, companyResults] = await Promise.all([
       meili.index(JOBS_INDEX).search(q.trim(), {
-        limit: 6,
+        limit: 999999,
         attributesToRetrieve: ['id', 'title', 'company_name', 'company_id', 'company_slug', 'city', 'work_type'],
         filter: filters.join(' AND '),
       }),
       meili.index(COMPANIES_INDEX).search(q.trim(), {
-        limit: 4,
+        limit: 999999,
         attributesToRetrieve: ['id', 'name', 'slug', 'logo_url', 'industry', 'job_count'],
       }),
     ]);
