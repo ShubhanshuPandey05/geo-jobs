@@ -11,6 +11,75 @@ import 'leaflet.markercluster/dist/MarkerCluster.css';
 import 'leaflet.markercluster/dist/MarkerCluster.Default.css';
 import './map.css';
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/** Expand a Leaflet LatLngBounds by a factor (e.g. 0.5 = 50% padding each side) */
+function padBounds(bounds, factor = 0.5) {
+  const sw = bounds.getSouthWest();
+  const ne = bounds.getNorthEast();
+  const latPad = (ne.lat - sw.lat) * factor;
+  const lngPad = (ne.lng - sw.lng) * factor;
+  return L.latLngBounds(
+    [sw.lat - latPad, sw.lng - lngPad],
+    [ne.lat + latPad, ne.lng + lngPad]
+  );
+}
+
+/** Industry → gradient color pair */
+const INDUSTRY_COLORS = {
+  Fintech: ['#6366f1', '#8b5cf6'],
+  'E-commerce': ['#ec4899', '#f43f5e'],
+  'Food Tech': ['#f59e0b', '#ef4444'],
+  SaaS: ['#06b6d4', '#3b82f6'],
+  'Developer Tools': ['#10b981', '#06b6d4'],
+  default: ['#6366f1', '#06b6d4'],
+};
+
+function getColors(industry) {
+  return INDUSTRY_COLORS[industry] || INDUSTRY_COLORS.default;
+}
+
+/** Build a Leaflet DivIcon for a company marker */
+function buildCompanyIcon(company) {
+  const [c1, c2] = getColors(company.industry);
+  return L.divIcon({
+    className: '',
+    html: `<div class="company-marker" style="background:linear-gradient(135deg,${c1},${c2});box-shadow:0 4px 16px ${c1}50,0 0 0 3px ${c1}10" title="${company.name}">${company.job_count || ''}</div>`,
+    iconSize: [38, 38],
+    iconAnchor: [19, 19],
+    popupAnchor: [0, -24],
+  });
+}
+
+/** Build HTML for a company popup */
+function buildPopupContent(company) {
+  const [c1, c2] = getColors(company.industry);
+  return `
+    <div style="padding: 18px; font-family: var(--font-sans, Inter, system-ui, -apple-system, sans-serif); min-width: 200px;">
+      <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+        ${company.logo_url
+      ? `<img src="${company.logo_url}" alt="" style="width:36px;height:36px;border-radius:10px;object-fit:cover;" />`
+      : `<div style="width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,${c1},${c2});display:flex;align-items:center;justify-content:center;color:white;font-weight:800;font-size:13px;box-shadow:0 4px 12px ${c1}30;">${company.name[0]}</div>`
+    }
+        <div>
+          <div style="font-weight:700;font-size:14px;color:var(--color-text-primary);line-height:1.2;">${company.name}</div>
+          <div style="font-size:11px;color:var(--color-text-secondary);margin-top:2px;">${company.industry || ''} · ${company.city || ''}</div>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:linear-gradient(135deg,${c1}10,${c2}10);border-radius:10px;border:1px solid ${c1}15;">
+        <span style="font-size:22px;font-weight:800;background:linear-gradient(135deg,${c1},${c2});-webkit-background-clip:text;-webkit-text-fill-color:transparent;">${company.job_count || 0}</span>
+        <span style="font-size:11px;color:var(--color-text-secondary);font-weight:500;">active jobs</span>
+      </div>
+      <button onclick="window.__selectCompany__('${company.slug}','${company.name}','${company.industry}','${company.city}')"
+        style="width:100%;margin-top:12px;padding:10px;background:linear-gradient(135deg,${c1},${c2});color:white;border:none;border-radius:10px;font-size:12px;font-weight:700;cursor:pointer;transition:all 0.2s;box-shadow:0 4px 12px ${c1}30;letter-spacing:0.3px;">
+        View Jobs →
+      </button>
+    </div>
+  `;
+}
+
+// ─── Component ────────────────────────────────────────────────────────────────
+
 export default function MapView({ selectedCity, onCompanySelect, selectedCompany, onMapLoad, userLocation, theme, showAllCompanies, onToggleShowAll }) {
   const mapContainer = useRef(null);
   const map = useRef(null);
@@ -20,6 +89,16 @@ export default function MapView({ selectedCity, onCompanySelect, selectedCompany
   const tempMarkerRef = useRef(null);
   const tempMarkerTimeoutRef = useRef(null);
   const [mapReady, setMapReady] = useState(false);
+
+  // Cache of created Leaflet markers, keyed by company.id + office-lat/lng
+  // so we never recreate DOM for an already-visible marker
+  const markerCacheRef = useRef(new Map());
+
+  // Track which marker keys are currently in the cluster group
+  const activeKeysRef = useRef(new Set());
+
+  // Debounce timer for viewport updates
+  const viewportTimerRef = useRef(null);
 
   const getTileLayerConfig = useCallback((mode) => {
     const attribution =
@@ -44,13 +123,14 @@ export default function MapView({ selectedCity, onCompanySelect, selectedCompany
 
   const city = CITIES[selectedCity] || CITIES.Bangalore;
 
-  // Fetch markers
+  // Fetch markers — still one call to get all data up-front
   const { data: markerData } = useQuery({
     queryKey: ['mapMarkers'],
     queryFn: () => fetchMapMarkers(),
     enabled: mapReady,
   });
 
+  // Filter companies based on the "show all" toggle and valid coords
   const visibleMarkers = useMemo(() => {
     if (!markerData?.data) return [];
 
@@ -73,6 +153,90 @@ export default function MapView({ selectedCity, onCompanySelect, selectedCompany
       tempMarkerRef.current = null;
     }
   }, []);
+
+  // ─── Build / retrieve a cached Leaflet marker for a company ─────────────
+  const getOrCreateMarker = useCallback((company) => {
+    const key = `${company.id}_${company.latitude}_${company.longitude}`;
+
+    if (markerCacheRef.current.has(key)) {
+      return { key, marker: markerCacheRef.current.get(key) };
+    }
+
+    const icon = buildCompanyIcon(company);
+    const popupContent = buildPopupContent(company);
+
+    const marker = L.marker(
+      [parseFloat(company.latitude), parseFloat(company.longitude)],
+      { icon }
+    ).bindPopup(popupContent, {
+      maxWidth: 300,
+      closeButton: true,
+      className: 'leaflet-dark-popup',
+    });
+
+    marker.on('click', () => {
+      map.current?.flyTo(
+        [parseFloat(company.latitude), parseFloat(company.longitude)],
+        14,
+        { duration: 0.8 }
+      );
+    });
+
+    markerCacheRef.current.set(key, marker);
+    return { key, marker };
+  }, []);
+
+  // ─── Core viewport-culling function ─────────────────────────────────────
+  const updateViewportMarkers = useCallback(() => {
+    if (!map.current || !clusterGroupRef.current || !visibleMarkers.length) return;
+
+    const rawBounds = map.current.getBounds();
+    // Pad bounds by 50% so markers just off-screen are pre-loaded (avoids pop-in during pan)
+    const paddedBounds = padBounds(rawBounds, 0.5);
+
+    const newKeys = new Set();
+    const toAdd = [];
+
+    for (const company of visibleMarkers) {
+      const lat = parseFloat(company.latitude);
+      const lng = parseFloat(company.longitude);
+
+      if (!paddedBounds.contains([lat, lng])) continue;
+
+      const { key, marker } = getOrCreateMarker(company);
+      newKeys.add(key);
+
+      if (!activeKeysRef.current.has(key)) {
+        toAdd.push(marker);
+      }
+    }
+
+    // Remove markers that left the viewport
+    const toRemove = [];
+    for (const key of activeKeysRef.current) {
+      if (!newKeys.has(key)) {
+        const marker = markerCacheRef.current.get(key);
+        if (marker) toRemove.push(marker);
+      }
+    }
+
+    if (toRemove.length) {
+      clusterGroupRef.current.removeLayers(toRemove);
+    }
+    if (toAdd.length) {
+      clusterGroupRef.current.addLayers(toAdd);
+    }
+
+    activeKeysRef.current = newKeys;
+  }, [visibleMarkers, getOrCreateMarker]);
+
+  // Debounced version for map move/zoom events
+  const debouncedViewportUpdate = useCallback(() => {
+    if (viewportTimerRef.current) clearTimeout(viewportTimerRef.current);
+    viewportTimerRef.current = setTimeout(() => {
+      updateViewportMarkers();
+    }, 150);
+  }, [updateViewportMarkers]);
 
   // ─── Initialize Leaflet map ──────────────────────────────────────────────
   useEffect(() => {
@@ -187,19 +351,22 @@ export default function MapView({ selectedCity, onCompanySelect, selectedCompany
     }, 1600);
   }, [userLocation]);
 
-  // ─── Render company markers (CLUSTERED) ─────────────────────────────────
+  // ─── Set up the cluster group + viewport listener (ONCE per data change) ─
   useEffect(() => {
     if (!map.current) return;
 
-    // Remove previous cluster group
+    // Tear down previous cluster group and listeners
     if (clusterGroupRef.current) {
       map.current.removeLayer(clusterGroupRef.current);
       clusterGroupRef.current = null;
     }
+    activeKeysRef.current = new Set();
+    // Don't clear markerCacheRef here — cached L.marker instances are reusable
 
     if (!visibleMarkers.length) return;
 
-    // Create cluster group with custom styling
+    // Create cluster group – note we no longer use disableClusteringAtZoom
+    // so clusters stay active at every zoom level for better performance.
     const clusterGroup = L.markerClusterGroup({
       maxClusterRadius: 50,
       spiderfyOnMaxZoom: true,
@@ -207,8 +374,10 @@ export default function MapView({ selectedCity, onCompanySelect, selectedCompany
       zoomToBoundsOnClick: true,
       disableClusteringAtZoom: 11,
       chunkedLoading: true,
-      chunkInterval: 100,
-      chunkDelay: 10,
+      chunkInterval: 200,
+      chunkDelay: 50,
+      animate: true,
+      removeOutsideVisibleBounds: true, // Leaflet.markercluster built-in optimisation
       iconCreateFunction: (cluster) => {
         const count = cluster.getChildCount();
         let size = 'small';
@@ -225,74 +394,16 @@ export default function MapView({ selectedCity, onCompanySelect, selectedCompany
       },
     });
 
-    const markers = visibleMarkers.map((company) => {
-      // Color by industry
-      const colors = {
-        Fintech: ['#6366f1', '#8b5cf6'],
-        'E-commerce': ['#ec4899', '#f43f5e'],
-        'Food Tech': ['#f59e0b', '#ef4444'],
-        SaaS: ['#06b6d4', '#3b82f6'],
-        'Developer Tools': ['#10b981', '#06b6d4'],
-        default: ['#6366f1', '#06b6d4'],
-      };
-      const [c1, c2] = colors[company.industry] || colors.default;
-
-      // Custom DivIcon
-      const icon = L.divIcon({
-        className: '',
-        html: `<div class="company-marker" style="background:linear-gradient(135deg,${c1},${c2});box-shadow:0 4px 16px ${c1}50,0 0 0 3px ${c1}10" title="${company.name}">${company.job_count || ''}</div>`,
-        iconSize: [38, 38],
-        iconAnchor: [19, 19],
-        popupAnchor: [0, -24],
-      });
-
-      // Enhanced popup content
-      const popupContent = `
-        <div style="padding: 18px; font-family: var(--font-sans, Inter, system-ui, -apple-system, sans-serif); min-width: 200px;">
-          <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
-            ${company.logo_url
-          ? `<img src="${company.logo_url}" alt="" style="width:36px;height:36px;border-radius:10px;object-fit:cover;" />`
-          : `<div style="width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,${c1},${c2});display:flex;align-items:center;justify-content:center;color:white;font-weight:800;font-size:13px;box-shadow:0 4px 12px ${c1}30;">${company.name[0]}</div>`
-        }
-            <div>
-              <div style="font-weight:700;font-size:14px;color:var(--color-text-primary);line-height:1.2;">${company.name}</div>
-              <div style="font-size:11px;color:var(--color-text-secondary);margin-top:2px;">${company.industry || ''} · ${company.city || ''}</div>
-            </div>
-          </div>
-          <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:linear-gradient(135deg,${c1}10,${c2}10);border-radius:10px;border:1px solid ${c1}15;">
-            <span style="font-size:22px;font-weight:800;background:linear-gradient(135deg,${c1},${c2});-webkit-background-clip:text;-webkit-text-fill-color:transparent;">${company.job_count || 0}</span>
-            <span style="font-size:11px;color:var(--color-text-secondary);font-weight:500;">active jobs</span>
-          </div>
-          <button onclick="window.__selectCompany__('${company.slug}','${company.name}','${company.industry}','${company.city}')"
-            style="width:100%;margin-top:12px;padding:10px;background:linear-gradient(135deg,${c1},${c2});color:white;border:none;border-radius:10px;font-size:12px;font-weight:700;cursor:pointer;transition:all 0.2s;box-shadow:0 4px 12px ${c1}30;letter-spacing:0.3px;">
-            View Jobs →
-          </button>
-        </div>
-      `;
-
-      const marker = L.marker(
-        [parseFloat(company.latitude), parseFloat(company.longitude)],
-        { icon }
-      ).bindPopup(popupContent, {
-        maxWidth: 300,
-        closeButton: true,
-        className: 'leaflet-dark-popup',
-      });
-
-      marker.on('click', () => {
-        map.current.flyTo(
-          [parseFloat(company.latitude), parseFloat(company.longitude)],
-          14,
-          { duration: 0.8 }
-        );
-      });
-
-      return marker;
-    });
-
-    clusterGroup.addLayers(markers);
     map.current.addLayer(clusterGroup);
     clusterGroupRef.current = clusterGroup;
+
+    // Initial population with viewport markers
+    updateViewportMarkers();
+
+    // Listen for map moves to refresh visible markers
+    const handler = () => debouncedViewportUpdate();
+    map.current.on('moveend', handler);
+    map.current.on('zoomend', handler);
 
     // Global handler for popup button clicks
     window.__selectCompany__ = (slug, name, industry, cityName) => {
@@ -300,9 +411,12 @@ export default function MapView({ selectedCity, onCompanySelect, selectedCompany
     };
 
     return () => {
+      map.current?.off('moveend', handler);
+      map.current?.off('zoomend', handler);
+      if (viewportTimerRef.current) clearTimeout(viewportTimerRef.current);
       delete window.__selectCompany__;
     };
-  }, [visibleMarkers, onCompanySelect]);
+  }, [visibleMarkers, onCompanySelect, updateViewportMarkers, debouncedViewportUpdate]);
 
   // ─── Highlight selected company ──────────────────────────────────────────
   useEffect(() => {
