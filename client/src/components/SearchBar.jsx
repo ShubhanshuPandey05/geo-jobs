@@ -150,7 +150,7 @@ export default function SearchBar({ selectedCity, onSearch, onCompanySelect }) {
   const hasResults = suggestions && (suggestions.jobs?.length > 0 || suggestions.companies?.length > 0);
 
   return (
-    <div className="relative flex-1 max-w-xl">
+    <div className="relative flex-1 min-w-0 max-w-xl">
       {/* Input */}
       <div className="relative group">
         <Search
@@ -165,7 +165,7 @@ export default function SearchBar({ selectedCity, onSearch, onCompanySelect }) {
           onChange={(e) => setQuery(e.target.value)}
           onFocus={() => query.length > 0 && suggestions && setIsOpen(true)}
           onKeyDown={handleKeyDown}
-          placeholder="Search jobs, companies, roles..."
+          placeholder="Search jobs..."
           autoComplete="off"
           className="w-full pl-10 pr-10 py-2 bg-surface-light/60 border border-border rounded-xl text-sm text-text-primary placeholder:text-text-muted/70 focus:outline-none focus:border-primary/50 focus:bg-surface-light focus:shadow-lg focus:shadow-primary/5 transition-all duration-300"
         />
@@ -189,8 +189,8 @@ export default function SearchBar({ selectedCity, onSearch, onCompanySelect }) {
       {isOpen && (
         <div
           ref={dropdownRef}
-          className="absolute top-full left-0 right-0 mt-2 bg-surface border border-border-light rounded-2xl shadow-2xl shadow-black/30 overflow-hidden z-[100] animate-slide-up"
-          style={{ maxHeight: '420px' }}
+          className="absolute top-full left-0 right-0 mt-2 bg-surface border border-border-light rounded-2xl shadow-2xl shadow-black/30 overflow-hidden z-[100] animate-slide-up md:max-h-[420px]"
+          style={{ maxHeight: 'min(420px, calc(100vh - 120px))' }}
         >
           {/* Speed indicator */}
           {processingTime !== null && (
